@@ -90,8 +90,8 @@ describe.skipIf(!SOCKET || !FILE)('irsaliye içe aktarma boru hattı (yerel Post
       max: 4,
     })
     await pool.query(AUTH_STUB)
-    const migration = readFileSync(path.join(process.cwd(), 'supabase/migrations/0001_init.sql'), 'utf8')
-    await pool.query(migration)
+    await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0001_init.sql'), 'utf8'))
+    await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0002_havuz_tahsis.sql'), 'utf8'))
     parsed = parseIrsaliyeXls(readFileSync(FILE!))
   }, 60000)
 
@@ -144,7 +144,9 @@ describe.skipIf(!SOCKET || !FILE)('irsaliye içe aktarma boru hattı (yerel Post
           !EXCLUDED.has(foldFirmCodeForExclusion(r.firmCodeNorm)),
       )
       .reduce((s, r) => s + (r.amountEurCents ?? 0), 0)
-    const { rows: open } = await pool.query('select coalesce(sum(open_debt_eur_cents),0)::bigint as s from firm_side_balances')
+    const { rows: open } = await pool.query(
+      'select coalesce(sum(pesin_open_eur_cents + vadeli_open_eur_cents),0)::bigint as s from firm_balances',
+    )
     expect(Number(open[0].s)).toBe(expectedOpen)
 
     // 31/12 kuralı: hiçbir 31/12 irsaliyesinin taksiti mutabakata girmedi

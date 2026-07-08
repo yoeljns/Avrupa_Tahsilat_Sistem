@@ -43,6 +43,8 @@ export interface OdemeRecord {
   hedefAcikEurRaw: string
   isAlc: boolean
   isComplete: boolean
+  /** KDV 1/5 ön ödemesi — mal borcu tahsisine girmez */
+  isKdv: boolean
 }
 
 export interface OdemeInvalidRow {
@@ -160,6 +162,7 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
 
       const kayitDurumu = cellStr(get('KAYIT DURUMU'))
       const kayitNorm = normText(kayitDurumu)
+      const kdv15Durumu = cellStr(get('KDV 1/5 DURUMU'))
 
       records.push({
         rowIndex: r + 1,
@@ -181,7 +184,7 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
         alacakliTl: cellNum(get('ALACAKLI TL')),
         alacakliEurCents: cellCents(get('ALACAKLI EURO')),
         alacakliIslemi: cellStr(get('ALACAKLI ISLEMI')),
-        kdv15Durumu: cellStr(get('KDV 1/5 DURUMU')),
+        kdv15Durumu,
         kdvFaturaReferansi: cellStr(get('KDV FATURA REFERANSI')),
         kdvFaturaToplamiEurCents: cellCents(get('KDV FATURA TOPLAMI EURO')),
         kdv15OnOdemeEurCents: cellCents(get('KDV 1/5 ON ODEME EURO')),
@@ -196,6 +199,7 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
         hedefAcikEurRaw: cellStr(get('HEDEF ACIK EUR')),
         isAlc: islemKodu.startsWith('ALC'),
         isComplete: kayitNorm === '' || kayitNorm === 'TAMAMLANDI',
+        isKdv: normText(kdv15Durumu) === 'EVET',
       })
     }
   }

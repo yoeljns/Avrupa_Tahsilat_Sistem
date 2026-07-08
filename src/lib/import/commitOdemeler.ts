@@ -182,6 +182,7 @@ export async function commitOdemelerBatch(
       hedef_acik_eur_raw: rec.hedefAcikEurRaw,
       is_alc: rec.isAlc,
       is_complete: rec.isComplete,
+      is_kdv: rec.isKdv ?? false,
       last_import_batch_id: batchId,
       updated_at: now,
     })

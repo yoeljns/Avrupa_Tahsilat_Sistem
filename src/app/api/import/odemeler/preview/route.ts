@@ -93,6 +93,7 @@ export async function POST(request: Request) {
 
   const alcCount = parsed.records.filter((r) => r.isAlc).length
   const incompleteCount = parsed.records.filter((r) => !r.isComplete).length
+  const kdvCount = parsed.records.filter((r) => r.isKdv).length
 
   return NextResponse.json({
     batchId: batch.id,
@@ -102,6 +103,7 @@ export async function POST(request: Request) {
       ...parsed.warnings,
       ...(alcCount > 0 ? [`${alcCount} ALC (alacak) kaydı bilgi olarak saklanacak, tahsise girmeyecek.`] : []),
       ...(incompleteCount > 0 ? [`${incompleteCount} kayıt TAMAMLANMAMIŞ durumda — tahsise girmeyecek.`] : []),
+      ...(kdvCount > 0 ? [`${kdvCount} KDV 1/5 ödemesi bilgi olarak saklanacak, mal borcu tahsisine girmeyecek.`] : []),
     ],
     samples: { updated: updatedSamples, invalid: parsed.invalids.slice(0, 20) },
   })

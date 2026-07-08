@@ -47,6 +47,7 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     pool = new Pool({ host: SOCKET, port: parseInt(process.env.PG_TEST_PORT ?? '55432', 10), user: 'postgres', database: 'tahsilat_pay', max: 4 })
     await pool.query(AUTH_STUB)
     await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0001_init.sql'), 'utf8'))
+    await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0002_havuz_tahsis.sql'), 'utf8'))
 
     // Önce irsaliyeler
     const parsedIrs = parseIrsaliyeXls(readFileSync(IRS!))
@@ -102,7 +103,7 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     return batchId
   }
 
-  it('gerçek ödemeler dosyası: 1601 kayıt, FIFO tahsis, taraf yalıtımı', async () => {
+  it('gerçek ödemeler dosyası: 1601 kayıt, tek havuz FIFO (önce peşin, sonra en yakın vade)', async () => {
     const batchId = await stageOdemeler()
     const stats = await commitOdemelerBatch(admin(), batchId, 't@t')
 
@@ -123,31 +124,73 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
       where not p.is_complete`)
     expect(inc[0].n).toBe(0)
 
-    // Taraf yalıtımı: PEŞİN sayfası ödemesi asla VADELI taksite gitmez (ve tersi)
-    const { rows: cross } = await pool.query(`
+    // KDV 1/5 ödemeleri (36 adet) tahsise girmedi
+    const { rows: kdvCount } = await pool.query(`select count(*)::int as n from payments where is_kdv`)
+    expect(kdvCount[0].n).toBe(36)
+    const { rows: kdvAlloc } = await pool.query(`
       select count(*)::int as n
-      from allocations a
-      join payments p on p.id = a.payment_id
-      join installments t on t.id = a.installment_id
-      where p.sheet_side <> t.side`)
-    expect(cross[0].n).toBe(0)
+      from allocations a join payments p on p.id = a.payment_id
+      where p.is_kdv`)
+    expect(kdvAlloc[0].n).toBe(0)
 
-    // Muhasebe değişmezi: her firma+taraf için
-    //   open_debt = toplam borç - tahsis ; credit = toplam ödeme - tahsis
+    // Peşin önceliği: bir firmada VADELİ taksite tahsis varsa, o firmanın
+    // TÜM peşin taksitleri tamamen kapanmış olmalı (havuz önce peşini öder)
+    const { rows: priorityBreak } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run'),
+      vadeli_firms as (
+        select distinct firm_id from allocations
+        where run_id = (select run_id from cur) and side = 'VADELI'
+      )
+      select count(*)::int as n
+      from installments t
+      join vadeli_firms v on v.firm_id = t.firm_id
+      where t.side = 'PESIN' and t.remaining_eur_cents is not null and t.remaining_eur_cents > 0`)
+    expect(priorityBreak[0].n).toBe(0)
+
+    // Muhasebe değişmezi (firma bazlı, tek havuz):
+    //   peşin_açık + vadeli_açık = toplam borç - tahsis ; alacak = toplam ödeme - tahsis
     const { rows: broken } = await pool.query(`
       with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run'),
       alloc as (
-        select firm_id, side, coalesce(sum(amount_eur_cents),0) as allocated
+        select firm_id, coalesce(sum(amount_eur_cents),0) as allocated
         from allocations where run_id = (select run_id from cur)
-        group by firm_id, side
+        group by firm_id
       )
       select count(*)::int as n
-      from firm_side_balances b
-      left join alloc a on a.firm_id = b.firm_id and a.side = b.side
+      from firm_balances b
+      left join alloc a on a.firm_id = b.firm_id
       where b.run_id = (select run_id from cur)
-        and (b.open_debt_eur_cents <> b.total_debt_eur_cents - coalesce(a.allocated,0)
+        and (b.pesin_open_eur_cents + b.vadeli_open_eur_cents <> b.total_debt_eur_cents - coalesce(a.allocated,0)
           or b.credit_eur_cents <> b.total_paid_eur_cents - coalesce(a.allocated,0))`)
     expect(broken[0].n).toBe(0)
+
+    // KULLANICININ ŞİKAYET ETTİĞİ ÖRNEK — 01 A03 ATAMAN:
+    // PEŞİN sayfasından gelen iki ödeme (9.600 € + 14.933,33 €) iki konsinye
+    // irsaliyesini kuruşuna kapatmalı; açık borç ve alacak 0 olmalı.
+    const { rows: ataman } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
+      select b.pesin_open_eur_cents, b.vadeli_open_eur_cents, b.credit_eur_cents
+      from firm_balances b
+      join firms f on f.id = b.firm_id
+      where b.run_id = (select run_id from cur) and f.code_norm = '01 A03'`)
+    expect(ataman).toHaveLength(1)
+    expect(ataman[0].pesin_open_eur_cents).toBe(0)
+    expect(ataman[0].vadeli_open_eur_cents).toBe(0)
+    expect(ataman[0].credit_eur_cents).toBe(0)
+
+    const { rows: atamanAlloc } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
+      select p.islem_kodu, i.fis_no, a.amount_eur_cents
+      from allocations a
+      join payments p on p.id = a.payment_id
+      join invoices i on i.id = a.invoice_id
+      join firms f on f.id = a.firm_id
+      where a.run_id = (select run_id from cur) and f.code_norm = '01 A03'
+      order by p.islem_kodu`)
+    expect(atamanAlloc).toEqual([
+      { islem_kodu: 'ISL-20260417-08EB', fis_no: 'AVI2026000000844', amount_eur_cents: 960000 },
+      { islem_kodu: 'ISL-20260608-495D', fis_no: 'AVI2026000001380', amount_eur_cents: 1493333 },
+    ])
 
     // Hariç firmaların ödemeleri tahsise girmedi (katlanmış eşleşme)
     const { rows: exclPay } = await pool.query(`
@@ -173,12 +216,12 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     // Özet çıktı (elle kontrol için)
     const { rows: summary } = await pool.query(`
       with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
-      select side,
-        sum(open_debt_eur_cents)::bigint as acik,
-        sum(overdue_eur_cents)::bigint as geciken,
+      select
+        sum(pesin_open_eur_cents)::bigint as pesin_acik,
+        sum(vadeli_open_eur_cents)::bigint as vadeli_acik,
+        sum(vadeli_overdue_eur_cents)::bigint as geciken,
         sum(credit_eur_cents)::bigint as alacak
-      from firm_side_balances where run_id = (select run_id from cur)
-      group by side order by side`)
+      from firm_balances where run_id = (select run_id from cur)`)
     console.log('Mutabakat özeti (cent):', JSON.stringify(summary))
   }, 180000)
 

@@ -3,7 +3,11 @@
 /** Satış tipi: Belge No sütunundan türetilir. */
 export type SaleType = 'PESIN' | 'KONSINYE' | 'KONSINYE_PESIN' | 'OTHER'
 
-/** Tahsilat tarafı: PESIN irsaliyeleri PEŞİN ödemelerle, KONSINYE + KONSINYE_PESIN irsaliyeleri VADELİ ödemelerle eşleşir. */
+/**
+ * Borç tarafı: PESIN irsaliyeleri "peşin borç", KONSINYE + KONSINYE_PESIN
+ * irsaliyeleri "vadeli borç" sayılır. Ödeme tarafında sayfa ayrımı yoktur:
+ * firma başına TEK havuz önce peşin borçları, sonra en yakın vadeli taksitleri kapatır.
+ */
 export type Side = 'PESIN' | 'VADELI'
 
 export type PlanParseStatus = 'ok' | 'cash' | 'empty_default' | 'net_days' | 'unparsed'
@@ -41,7 +45,6 @@ export interface EnginePayment {
   id: string
   islemKodu: string
   firmId: string
-  side: Side
   /** ISO tarih/zaman (sıralama için) */
   dateISO: string
   amountCents: number
@@ -52,20 +55,22 @@ export interface AllocationOut {
   installmentId: string
   invoiceId: string
   firmId: string
+  /** Kapatılan TAKSİDİN tarafı (ödemenin geldiği sayfa değil) */
   side: Side
   amountCents: number
 }
 
-export interface FirmSideBalanceOut {
+export interface FirmBalanceOut {
   firmId: string
-  side: Side
-  /** Kalan açık borç (tahsis sonrası) */
-  openDebtCents: number
-  /** asOf tarihinden önce vadesi geçmiş kalan borç */
-  overdueCents: number
-  /** Tahsis edilemeyen ödeme fazlası = firmanın bu taraftaki alacağı */
+  /** Peşin borçlardan kalan */
+  pesinOpenCents: number
+  /** Vadeli (konsinye) taksitlerden kalan */
+  vadeliOpenCents: number
+  /** asOf tarihinden önce vadesi geçmiş vadeli kalanlar */
+  vadeliOverdueCents: number
+  /** Havuzdan artan ödeme = firmanın alacağı (tek, taraf ayrımsız) */
   creditCents: number
-  /** Kalanı olan en erken vade */
+  /** Kalanı olan en erken vadeli taksit tarihi */
   nextDueDate: string | null
   totalDebtCents: number
   totalPaidCents: number
@@ -77,7 +82,7 @@ export interface EngineOutput {
   remainingByInstallment: Map<string, number>
   /** ödeme id -> tahsis edilemeyen kalan */
   unallocatedByPayment: Map<string, number>
-  balances: FirmSideBalanceOut[]
+  balances: FirmBalanceOut[]
   stats: {
     installmentCount: number
     paymentCount: number

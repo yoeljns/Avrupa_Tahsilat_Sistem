@@ -1,13 +1,17 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { foldFirmCodeForExclusion } from '@/lib/engine/normalize'
+import { foldFirmCodeForExclusion, normText } from '@/lib/engine/normalize'
 import { reconcile } from '@/lib/engine/reconcile'
 import type { EngineInstallment, EnginePayment, Side } from '@/lib/engine/types'
 import { chunkedWrite, fetchAll } from '@/lib/db'
 
 // Mutabakatı baştan hesaplar ve SÜRÜMLÜ olarak yazar:
-// yeni recon_run altına tüm tahsisler + bakiyeler yazılır, ardından
+// yeni recon_run altına tüm tahsisler + firma bakiyeleri yazılır, ardından
 // app_settings.current_recon_run işaretçisi çevrilir. Okuyucular asla
 // yarım yazılmış koşu görmez. Son 5 koşu saklanır.
+//
+// Tahsis kuralı (tek havuz): ödemenin geldiği sayfa (PEŞİN/VADELİ) önemsizdir;
+// firma başına tüm ödemeler önce peşin borçları, sonra en yakın vadeli
+// taksitleri kapatır. ALC, TAMAMLANMAMIŞ ve KDV 1/5 ödemeleri tahsise girmez.
 
 export type TriggerKind = 'import' | 'edit' | 'manual' | 'setup'
 
@@ -34,9 +38,9 @@ interface PaymentRow {
   id: string
   islem_kodu: string
   firm_id: string
-  sheet_side: Side
   islem_tarihi: string | null
   doviz_eur_cents: number | null
+  kdv15_durumu: string | null
 }
 
 export interface RecomputeStats {
@@ -68,7 +72,7 @@ export async function runRecompute(
     if (inv.is_allocatable && inv.side) allocatable.set(inv.id, inv)
   }
 
-  // Hariç firmalar: ödemeleri de kapsam dışı kalır
+  // Hariç firmalar: ödemeleri de kapsam dışı kalır (Türkçe katlamalı eşleşme)
   const excludedFirmIds = new Set<string>()
   {
     const firms = await fetchAll<{ id: string; code_norm: string }>((from, to) =>
@@ -77,7 +81,6 @@ export async function runRecompute(
     const excludedCodes = await fetchAll<{ code_norm: string }>((from, to) =>
       admin.from('excluded_firm_codes').select('code_norm').order('code_norm').range(from, to),
     )
-    // Hariç eşleşmesi Türkçe katlamayla yapılır ('54 C03' listedeyken '54 Ç03' verisi eşleşir)
     const codes = new Set(excludedCodes.map((c) => foldFirmCodeForExclusion(c.code_norm)))
     for (const f of firms) if (codes.has(foldFirmCodeForExclusion(f.code_norm))) excludedFirmIds.add(f.id)
   }
@@ -111,11 +114,12 @@ export async function runRecompute(
     })
   }
 
-  // 3) Tahsise açık ödemeler
+  // 3) Tahsise açık ödemeler (tek havuz; KDV 1/5 hariç — 0002 öncesi DB'lerde de
+  //    doğru davranmak için KDV kontrolü uygulama tarafında da yapılır)
   const paymentRows = await fetchAll<PaymentRow>((from, to) =>
     admin
       .from('payments')
-      .select('id, islem_kodu, firm_id, sheet_side, islem_tarihi, doviz_eur_cents')
+      .select('id, islem_kodu, firm_id, islem_tarihi, doviz_eur_cents, kdv15_durumu')
       .eq('allocatable', true)
       .order('id')
       .range(from, to),
@@ -124,11 +128,11 @@ export async function runRecompute(
   for (const p of paymentRows) {
     if (excludedFirmIds.has(p.firm_id)) continue
     if (!p.doviz_eur_cents || p.doviz_eur_cents <= 0) continue
+    if (normText(p.kdv15_durumu) === 'EVET') continue // KDV 1/5 ödemesi — mal borcuna sayılmaz
     enginePayments.push({
       id: p.id,
       islemKodu: p.islem_kodu,
       firmId: p.firm_id,
-      side: p.sheet_side,
       dateISO: p.islem_tarihi ?? '9999-12-31T00:00:00.000Z',
       amountCents: p.doviz_eur_cents,
     })
@@ -168,13 +172,13 @@ export async function runRecompute(
   )
 
   await chunkedWrite(result.balances, (chunk) =>
-    admin.from('firm_side_balances').insert(
+    admin.from('firm_balances').insert(
       chunk.map((b) => ({
         run_id: runId,
         firm_id: b.firmId,
-        side: b.side,
-        open_debt_eur_cents: b.openDebtCents,
-        overdue_eur_cents: b.overdueCents,
+        pesin_open_eur_cents: b.pesinOpenCents,
+        vadeli_open_eur_cents: b.vadeliOpenCents,
+        vadeli_overdue_eur_cents: b.vadeliOverdueCents,
         credit_eur_cents: b.creditCents,
         next_due_date: b.nextDueDate,
         total_debt_eur_cents: b.totalDebtCents,
