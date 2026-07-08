@@ -1,0 +1,204 @@
+import * as XLSX from 'xlsx'
+import { excelSerialToTimestamp } from '@/lib/engine/dates'
+import { numberToCents, parseEurToCents } from '@/lib/engine/money'
+import { normText, normalizeFirmCode } from '@/lib/engine/normalize'
+
+// Gelen ödemeler .xlsx ayrıştırıcısı.
+// Yalnız PEŞİN ve VADELİ sayfaları okunur (LOG_*, ODEME_* vb. atlanır).
+// Sütunlar pozisyonla değil, BAŞLIK ADLARIYLA (Türkçe katlanmış) eşlenir —
+// sütun sırası değişse de içe aktarma bozulmaz.
+
+export interface OdemeRecord {
+  rowIndex: number
+  sheet: string
+  sheetSide: 'PESIN' | 'VADELI'
+  islemKodu: string
+  islemTarihiISO: string | null
+  firmaRaw: string
+  firmCodeRaw: string
+  firmCodeNorm: string
+  gelenTl: number | null
+  dovizEurCents: number | null
+  kur: number | null
+  toplamTl: number | null
+  fark: number | null
+  odemeSekli: string
+  aciklama: string
+  alacakliDurumu: string
+  alacakliTl: number | null
+  alacakliEurCents: number | null
+  alacakliIslemi: string
+  kdv15Durumu: string
+  kdvFaturaReferansi: string
+  kdvFaturaToplamiEurCents: number | null
+  kdv15OnOdemeEurCents: number | null
+  kdvKalanBorcEurCents: number | null
+  kdvTaksitSayisi: string
+  kdvTaksitBasiEurCents: number | null
+  kayitDurumu: string
+  eksikAlanlar: string
+  isleyen: string
+  islemZamaniRaw: string
+  hedefFisNo: string
+  hedefAcikEurRaw: string
+  isAlc: boolean
+  isComplete: boolean
+}
+
+export interface OdemeInvalidRow {
+  rowIndex: number
+  sheet: string
+  error: string
+  preview: string
+}
+
+export interface ParsedOdemeler {
+  records: OdemeRecord[]
+  invalids: OdemeInvalidRow[]
+  warnings: string[]
+}
+
+type Cell = string | number | boolean | null | undefined
+
+function cellStr(v: Cell): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'number') return String(v)
+  return String(v).trim()
+}
+
+function cellNum(v: Cell): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim()) {
+    const cents = parseEurToCents(v)
+    return cents === null ? null : cents / 100
+  }
+  return null
+}
+
+function cellCents(v: Cell): number | null {
+  if (typeof v === 'number') return numberToCents(v)
+  if (typeof v === 'string' && v.trim()) return parseEurToCents(v)
+  return null
+}
+
+function cellTimestamp(v: Cell): string | null {
+  if (typeof v === 'number') return excelSerialToTimestamp(v)
+  if (typeof v === 'string' && v.trim()) {
+    // '2026-01-05 00:00:00' veya '05.01.2026' biçimleri
+    const iso = v.trim().replace(' ', 'T')
+    const d = new Date(iso.includes('T') ? iso + (iso.endsWith('Z') ? '' : 'Z') : iso)
+    if (!Number.isNaN(d.getTime())) return d.toISOString()
+    const tr = /^(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(v.trim())
+    if (tr) {
+      const [, dd, mm, yyyy] = tr
+      return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}T00:00:00.000Z`
+    }
+  }
+  return null
+}
+
+/** Başlık satırından katlanmış-ad → sütun indeksi haritası kurar. */
+function headerMap(headerRow: Cell[]): Map<string, number> {
+  const map = new Map<string, number>()
+  headerRow.forEach((cell, idx) => {
+    const key = normText(cellStr(cell))
+    if (key && !map.has(key)) map.set(key, idx)
+  })
+  return map
+}
+
+const REQUIRED_HEADERS = ['ISLEM KODU', 'FIRMA KODU', 'DOVIZ EURO']
+
+export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
+  const wb = XLSX.read(buf, { type: buf instanceof ArrayBuffer ? 'array' : 'buffer', raw: true })
+  const records: OdemeRecord[] = []
+  const invalids: OdemeInvalidRow[] = []
+  const warnings: string[] = []
+  const seenKodu = new Set<string>()
+
+  const targetSheets = wb.SheetNames.filter((n) => {
+    const f = normText(n)
+    return f === 'PESIN' || f === 'VADELI'
+  })
+  if (targetSheets.length === 0) {
+    return { records, invalids, warnings: ["Dosyada 'PEŞİN' veya 'VADELİ' sayfası bulunamadı."] }
+  }
+
+  for (const sheetName of targetSheets) {
+    const side: 'PESIN' | 'VADELI' = normText(sheetName) === 'PESIN' ? 'PESIN' : 'VADELI'
+    const rows = XLSX.utils.sheet_to_json<Cell[]>(wb.Sheets[sheetName], { header: 1, raw: true, defval: null })
+    if (rows.length === 0) continue
+
+    const h = headerMap(rows[0] ?? [])
+    const missing = REQUIRED_HEADERS.filter((k) => !h.has(k))
+    if (missing.length > 0) {
+      warnings.push(`'${sheetName}' sayfasında beklenen başlıklar eksik: ${missing.join(', ')} — sayfa atlandı.`)
+      continue
+    }
+
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r] ?? []
+      const get = (name: string): Cell => {
+        const idx = h.get(name)
+        return idx === undefined ? undefined : row[idx]
+      }
+
+      const islemKodu = cellStr(get('ISLEM KODU'))
+      if (!islemKodu) continue // boş satır
+
+      if (seenKodu.has(islemKodu)) {
+        invalids.push({ rowIndex: r + 1, sheet: sheetName, error: `İşlem kodu tekrar ediyor: ${islemKodu}`, preview: islemKodu })
+        continue
+      }
+      seenKodu.add(islemKodu)
+
+      const firmCodeRaw = cellStr(get('FIRMA KODU'))
+      if (!firmCodeRaw) {
+        invalids.push({ rowIndex: r + 1, sheet: sheetName, error: 'Firma kodu boş', preview: islemKodu })
+        continue
+      }
+
+      const kayitDurumu = cellStr(get('KAYIT DURUMU'))
+      const kayitNorm = normText(kayitDurumu)
+
+      records.push({
+        rowIndex: r + 1,
+        sheet: sheetName,
+        sheetSide: side,
+        islemKodu,
+        islemTarihiISO: cellTimestamp(get('ISLEM TARIHI')),
+        firmaRaw: cellStr(get('FIRMA')),
+        firmCodeRaw,
+        firmCodeNorm: normalizeFirmCode(firmCodeRaw),
+        gelenTl: cellNum(get('GELEN TL')),
+        dovizEurCents: cellCents(get('DOVIZ EURO')),
+        kur: cellNum(get('KUR')),
+        toplamTl: cellNum(get('TOPLAM TL')),
+        fark: cellNum(get('FARK')),
+        odemeSekli: cellStr(get('ODEME SEKLI')),
+        aciklama: cellStr(get('ACIKLAMA')),
+        alacakliDurumu: cellStr(get('ALACAKLI DURUMU')),
+        alacakliTl: cellNum(get('ALACAKLI TL')),
+        alacakliEurCents: cellCents(get('ALACAKLI EURO')),
+        alacakliIslemi: cellStr(get('ALACAKLI ISLEMI')),
+        kdv15Durumu: cellStr(get('KDV 1/5 DURUMU')),
+        kdvFaturaReferansi: cellStr(get('KDV FATURA REFERANSI')),
+        kdvFaturaToplamiEurCents: cellCents(get('KDV FATURA TOPLAMI EURO')),
+        kdv15OnOdemeEurCents: cellCents(get('KDV 1/5 ON ODEME EURO')),
+        kdvKalanBorcEurCents: cellCents(get('KDV KALAN BORC EURO')),
+        kdvTaksitSayisi: cellStr(get('KDV TAKSIT SAYISI')),
+        kdvTaksitBasiEurCents: cellCents(get('KDV TAKSIT BASI EURO')),
+        kayitDurumu,
+        eksikAlanlar: cellStr(get('EKSIK ALANLAR')),
+        isleyen: cellStr(get('ISLEYEN')),
+        islemZamaniRaw: cellStr(get('ISLEM ZAMANI')),
+        hedefFisNo: cellStr(get('HEDEF FIS NO')),
+        hedefAcikEurRaw: cellStr(get('HEDEF ACIK EUR')),
+        isAlc: islemKodu.startsWith('ALC'),
+        isComplete: kayitNorm === '' || kayitNorm === 'TAMAMLANDI',
+      })
+    }
+  }
+
+  return { records, invalids, warnings }
+}
