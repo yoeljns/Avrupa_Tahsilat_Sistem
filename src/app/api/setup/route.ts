@@ -45,7 +45,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Kurulum anahtarı hatalı.' }, { status: 403 })
   }
 
-  const admin = createAdminSupabase()
+  let admin
+  try {
+    admin = createAdminSupabase()
+  } catch (e) {
+    // Supabase env değişkenleri eksik — kullanıcıya hangi adımın atlandığını söyle
+    return NextResponse.json(
+      {
+        error:
+          (e instanceof Error ? e.message : 'Supabase yapılandırması eksik.') +
+          ' Önce Vercel > Storage üzerinden Supabase bağlantısını kurun (README adım 2), sonra Redeploy yapın.',
+      },
+      { status: 500 },
+    )
+  }
 
   const { data: settings, error: settingsError } = await admin
     .from('app_settings')

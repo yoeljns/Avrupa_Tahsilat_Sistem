@@ -10,7 +10,25 @@ const PUBLIC_PATHS = ['/login', '/setup']
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
 
-  const supabase = createServerClient(supabaseUrl(), supabaseAnonKey(), {
+  // Supabase env değişkenleri henüz bağlanmadıysa siteyi 500'e düşürme:
+  // kurulum sihirbazına yönlendir, /setup ve /api kendi Türkçe mesajlarını verir.
+  let url: string
+  let anonKey: string
+  try {
+    url = supabaseUrl()
+    anonKey = supabaseAnonKey()
+  } catch {
+    const path = request.nextUrl.pathname
+    if (path === '/setup' || path.startsWith('/setup/') || path.startsWith('/api')) {
+      return response
+    }
+    const redirectUrl = request.nextUrl.clone()
+    redirectUrl.pathname = '/setup'
+    redirectUrl.search = ''
+    return NextResponse.redirect(redirectUrl)
+  }
+
+  const supabase = createServerClient(url, anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll()

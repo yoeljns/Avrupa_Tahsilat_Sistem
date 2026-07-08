@@ -89,7 +89,8 @@ yeniden hesaplanır.
 
 | Belirti | Çözüm |
 |---|---|
-| "Eksik ortam değişkeni" hatası | Vercel → Settings → Environment Variables'da Supabase anahtarlarının ve `SETUP_SECRET`'ın olduğundan emin olun, sonra **Redeploy** yapın. |
+| Site `404: NOT_FOUND` veriyor (deployment "Ready" olduğu halde) | Repo boşken import edildiyse Vercel framework'ü algılayamaz ve sayfaları servis etmez. Bu repodaki `vercel.json` bunu otomatik düzeltir — son kodu çekip yeniden deploy edin. Alternatif: Vercel → Settings → **Build and Deployment** → Framework Preset = **Next.js** → Redeploy. |
+| "Eksik ortam değişkeni" hatası veya site sizi sürekli `/setup`'a atıyor | Vercel → Settings → Environment Variables'da Supabase anahtarlarının ve `SETUP_SECRET`'ın olduğundan emin olun (README adım 2–3), sonra **Redeploy** yapın. |
 | `/setup` "Veritabanına ulaşılamadı" diyor | 4. adımdaki SQL henüz çalıştırılmamış. `0001_init.sql`'i Supabase SQL Editor'de çalıştırın. |
 | `/setup` "Kurulum daha önce tamamlanmış" diyor | Normal — kullanıcılar zaten oluşturulmuş. Yeni kullanıcı/şifre işlemleri **Yönetim → Kullanıcılar**'dan yapılır. |
 | Pazarlamacı hiç firma göremiyor | Bayi listesindeki `pazarlamaci_email` ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayi Listesi**'nden dosyayı güncelleyin. |
