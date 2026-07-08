@@ -2,7 +2,7 @@ import Link from 'next/link'
 import MonthMatrix from '@/components/MonthMatrix'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { addMonths, eur, monthOf, todayISO, trMonth } from '@/lib/format'
-import { currentRunId, openInstallments } from '@/lib/queries'
+import { currentRunId, pazarlamaciByFirm, scopeInstallments } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -15,11 +15,15 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
   const month = /^\d{4}-\d{2}$/.test(params.ay ?? '') ? params.ay! : monthOf(todayISO())
 
   const runId = await currentRunId(supabase)
-  const rows = runId ? await openInstallments(supabase, 'VADELI') : []
+  const [rows, sorumlu] = runId
+    ? await Promise.all([scopeInstallments(supabase, 'VADELI'), pazarlamaciByFirm(supabase)])
+    : [[], new Map<string, string>()]
 
   const today = todayISO()
+  const totalKalan = rows.reduce((s, r) => s + r.remaining_eur_cents, 0)
+  const totalOdenen = rows.reduce((s, r) => s + r.paid_eur_cents, 0)
   const overdue = rows.filter((r) => r.due_date < today).reduce((s, r) => s + r.remaining_eur_cents, 0)
-  const noDateCount = rows.filter((r) => r.no_date_flag).length
+  const noDateCount = rows.filter((r) => r.no_date_flag && r.remaining_eur_cents > 0).length
 
   return (
     <div>
@@ -27,7 +31,8 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
         <div>
           <h1 className="text-lg font-bold text-slate-900">Konsinye / Konsinye Peşin</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Vade takvimi — toplam açık: <strong className="tabular-nums">{eur(rows.reduce((s, r) => s + r.remaining_eur_cents, 0))}</strong>
+            Ödenen: <strong className="tabular-nums text-emerald-600">{eur(totalOdenen)}</strong>
+            {' '}· Kalan borç: <strong className="tabular-nums">{eur(totalKalan)}</strong>
             {overdue > 0 && (
               <>
                 {' '}· vadesi geçmiş: <strong className="tabular-nums text-red-600">{eur(overdue)}</strong>
@@ -62,7 +67,7 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
       </div>
 
       <div className="mt-4">
-        <MonthMatrix rows={rows} month={month} />
+        <MonthMatrix rows={rows} month={month} sorumluByFirm={sorumlu} />
       </div>
     </div>
   )

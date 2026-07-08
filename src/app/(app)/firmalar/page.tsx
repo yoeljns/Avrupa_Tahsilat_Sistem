@@ -12,12 +12,12 @@ export default async function FirmalarPage() {
 
   const byFirm = new Map<string, { pesin: number; vadeli: number; credit: number; nextDue: string | null }>()
   for (const b of balances) {
-    let agg = byFirm.get(b.firm_id)
-    if (!agg) byFirm.set(b.firm_id, (agg = { pesin: 0, vadeli: 0, credit: 0, nextDue: null }))
-    if (b.side === 'PESIN') agg.pesin += b.open_debt_eur_cents
-    else agg.vadeli += b.open_debt_eur_cents
-    agg.credit += b.credit_eur_cents
-    if (b.next_due_date && (!agg.nextDue || b.next_due_date < agg.nextDue)) agg.nextDue = b.next_due_date
+    byFirm.set(b.firm_id, {
+      pesin: b.pesin_open_eur_cents,
+      vadeli: b.vadeli_open_eur_cents,
+      credit: b.credit_eur_cents,
+      nextDue: b.next_due_date,
+    })
   }
 
   const visibleFirms = firms.filter((f) => !excluded.has(f.code_norm))

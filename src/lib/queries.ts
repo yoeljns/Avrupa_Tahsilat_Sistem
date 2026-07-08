@@ -9,11 +9,12 @@ export async function currentRunId(supabase: SupabaseClient): Promise<string | n
   return (data?.run_id as string | undefined) ?? null
 }
 
+/** Firma bazlı bakiye (tek havuz modeli). */
 export interface BalanceRow {
   firm_id: string
-  side: 'PESIN' | 'VADELI'
-  open_debt_eur_cents: number
-  overdue_eur_cents: number
+  pesin_open_eur_cents: number
+  vadeli_open_eur_cents: number
+  vadeli_overdue_eur_cents: number
   credit_eur_cents: number
   next_due_date: string | null
   total_debt_eur_cents: number
@@ -23,8 +24,10 @@ export interface BalanceRow {
 export async function balancesAtRun(supabase: SupabaseClient, runId: string): Promise<BalanceRow[]> {
   return fetchAll<BalanceRow>((from, to) =>
     supabase
-      .from('firm_side_balances')
-      .select('firm_id, side, open_debt_eur_cents, overdue_eur_cents, credit_eur_cents, next_due_date, total_debt_eur_cents, total_paid_eur_cents')
+      .from('firm_balances')
+      .select(
+        'firm_id, pesin_open_eur_cents, vadeli_open_eur_cents, vadeli_overdue_eur_cents, credit_eur_cents, next_due_date, total_debt_eur_cents, total_paid_eur_cents',
+      )
       .eq('run_id', runId)
       .order('firm_id')
       .range(from, to),
@@ -52,7 +55,8 @@ export async function allFirms(supabase: SupabaseClient): Promise<FirmRow[]> {
   )
 }
 
-export interface OpenInstallmentRow {
+/** Kapsam içi taksit — tam ödenmişler DAHİL (BORÇ/ÖDEME/KALAN görünümü için). */
+export interface ScopeInstallmentRow {
   installment_id: string
   invoice_id: string
   firm_id: string
@@ -65,15 +69,21 @@ export interface OpenInstallmentRow {
   fis_no: string
   amount_eur_cents: number
   remaining_eur_cents: number
+  paid_eur_cents: number
   no_date_flag: boolean
   source: string
 }
 
-export async function openInstallments(supabase: SupabaseClient, side?: 'PESIN' | 'VADELI'): Promise<OpenInstallmentRow[]> {
-  return fetchAll<OpenInstallmentRow>((from, to) => {
+export async function scopeInstallments(
+  supabase: SupabaseClient,
+  side?: 'PESIN' | 'VADELI',
+): Promise<ScopeInstallmentRow[]> {
+  return fetchAll<ScopeInstallmentRow>((from, to) => {
     let q = supabase
-      .from('v_open_installments')
-      .select('installment_id, invoice_id, firm_id, firm_code, firm_name, side, seq, due_date, invoice_date, fis_no, amount_eur_cents, remaining_eur_cents, no_date_flag, source')
+      .from('v_installments_scope')
+      .select(
+        'installment_id, invoice_id, firm_id, firm_code, firm_name, side, seq, due_date, invoice_date, fis_no, amount_eur_cents, remaining_eur_cents, paid_eur_cents, no_date_flag, source',
+      )
     if (side) q = q.eq('side', side)
     return q.order('due_date').order('firm_code').order('installment_id').range(from, to)
   })
@@ -85,4 +95,14 @@ export async function excludedCodeSet(supabase: SupabaseClient): Promise<Set<str
     supabase.from('excluded_firm_codes').select('code_norm').order('code_norm').range(from, to),
   )
   return new Set(rows.map((r) => r.code_norm))
+}
+
+/** Firma id → pazarlamacı e-postasının kullanıcı adı kısmı (SORUMLU sütunu). */
+export async function pazarlamaciByFirm(supabase: SupabaseClient): Promise<Map<string, string>> {
+  const firms = await allFirms(supabase)
+  const map = new Map<string, string>()
+  for (const f of firms) {
+    if (f.pazarlamaci_email) map.set(f.id, f.pazarlamaci_email.split('@')[0].toUpperCase())
+  }
+  return map
 }

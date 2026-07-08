@@ -47,11 +47,12 @@ export async function GET() {
     doviz_eur_cents: number | null
     allocatable: boolean
     is_alc: boolean
+    is_kdv: boolean
   }
   const payments = await fetchAll<PayRow>((from, to) =>
     admin
       .from('payments')
-      .select('id, islem_kodu, firm_id, sheet_side, islem_tarihi, doviz_eur_cents, allocatable, is_alc')
+      .select('id, islem_kodu, firm_id, sheet_side, islem_tarihi, doviz_eur_cents, allocatable, is_alc, is_kdv')
       .order('islem_tarihi')
       .range(from, to),
   )
@@ -124,7 +125,13 @@ export async function GET() {
         c2e(total),
         c2e(allocated),
         c2e(p.allocatable ? rest : null),
-        p.is_alc ? 'ALC (eski sistem alacak kaydı)' : p.allocatable ? 'Alacak' : 'Tahsise kapalı',
+        p.is_alc
+          ? 'ALC (eski sistem alacak kaydı)'
+          : p.is_kdv
+            ? 'KDV 1/5 ödemesi (tahsise girmez)'
+            : p.allocatable
+              ? 'Alacak'
+              : 'Tahsise kapalı',
       ])
     }
   }

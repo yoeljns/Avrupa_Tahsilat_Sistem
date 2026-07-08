@@ -57,6 +57,7 @@ interface PayRow {
   aciklama: string | null
   kayit_durumu: string | null
   is_alc: boolean
+  is_kdv: boolean
   allocatable: boolean
 }
 
@@ -105,7 +106,7 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
     fetchAll<PayRow>((from, to) =>
       supabase
         .from('payments')
-        .select('id, islem_kodu, sheet_side, islem_tarihi, gelen_tl, doviz_eur_cents, kur, aciklama, kayit_durumu, is_alc, allocatable')
+        .select('id, islem_kodu, sheet_side, islem_tarihi, gelen_tl, doviz_eur_cents, kur, aciklama, kayit_durumu, is_alc, is_kdv, allocatable')
         .eq('firm_id', id)
         .order('islem_tarihi', { ascending: false })
         .range(from, to),
@@ -113,11 +114,13 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
     runId
       ? fetchAll<BalanceRow>((from, to) =>
           supabase
-            .from('firm_side_balances')
-            .select('firm_id, side, open_debt_eur_cents, overdue_eur_cents, credit_eur_cents, next_due_date, total_debt_eur_cents, total_paid_eur_cents')
+            .from('firm_balances')
+            .select(
+              'firm_id, pesin_open_eur_cents, vadeli_open_eur_cents, vadeli_overdue_eur_cents, credit_eur_cents, next_due_date, total_debt_eur_cents, total_paid_eur_cents',
+            )
             .eq('run_id', runId)
             .eq('firm_id', id)
-            .order('side')
+            .order('firm_id')
             .range(from, to),
         )
       : Promise.resolve([] as BalanceRow[]),
@@ -150,8 +153,7 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
   }
 
   const today = todayISO()
-  const vadeli = balances.find((b) => b.side === 'VADELI')
-  const pesin = balances.find((b) => b.side === 'PESIN')
+  const bal = balances[0]
 
   return (
     <div>
@@ -175,25 +177,25 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl bg-white p-5 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Konsinye Açık Borç</p>
-          <p className="mt-2 text-2xl font-bold tabular-nums">{eur(vadeli?.open_debt_eur_cents ?? 0)}</p>
+          <p className="mt-2 text-2xl font-bold tabular-nums">{eur(bal?.vadeli_open_eur_cents ?? 0)}</p>
           <p className="mt-1 text-xs text-slate-500">
-            Vadesi geçmiş: <span className="tabular-nums text-red-600">{eur(vadeli?.overdue_eur_cents ?? 0)}</span>
-            {vadeli?.next_due_date && <> · İlk vade: {trDate(vadeli.next_due_date)}</>}
+            Vadesi geçmiş: <span className="tabular-nums text-red-600">{eur(bal?.vadeli_overdue_eur_cents ?? 0)}</span>
+            {bal?.next_due_date && <> · İlk vade: {trDate(bal.next_due_date)}</>}
           </p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Peşin Açık Borç</p>
-          <p className="mt-2 text-2xl font-bold tabular-nums">{eur(pesin?.open_debt_eur_cents ?? 0)}</p>
+          <p className="mt-2 text-2xl font-bold tabular-nums">{eur(bal?.pesin_open_eur_cents ?? 0)}</p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Alacak (Vadeli)</p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-600">{eur(vadeli?.credit_eur_cents ?? 0)}</p>
-          <p className="mt-1 text-xs text-slate-500">Sonraki vadeden düşülür</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Toplam Ödeme</p>
+          <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-600">{eur(bal?.total_paid_eur_cents ?? 0)}</p>
+          <p className="mt-1 text-xs text-slate-500">Tahsise giren ödemeler (KDV 1/5 hariç)</p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Alacak (Peşin)</p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-600">{eur(pesin?.credit_eur_cents ?? 0)}</p>
-          <p className="mt-1 text-xs text-slate-500">Sonraki peşin borçtan düşülür</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Alacak</p>
+          <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-600">{eur(bal?.credit_eur_cents ?? 0)}</p>
+          <p className="mt-1 text-xs text-slate-500">Fazla ödeme — bir sonraki borçtan düşülür</p>
         </div>
       </div>
 
@@ -338,7 +340,12 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                     <td className="px-3 py-2 font-medium">
                       {p.islem_kodu}
                       {p.is_alc && <span className="ml-1 rounded bg-slate-200 px-1 text-xs text-slate-600" title="Eski sistemin alacak kaydı — tahsise girmez">ALC</span>}
-                      {!p.is_alc && !p.allocatable && (
+                      {p.is_kdv && (
+                        <span className="ml-1 rounded bg-violet-100 px-1 text-xs text-violet-700" title="KDV 1/5 ön ödemesi — mal borcu tahsisine girmez">
+                          KDV 1/5
+                        </span>
+                      )}
+                      {!p.is_alc && !p.is_kdv && !p.allocatable && (
                         <span className="ml-1 rounded bg-amber-100 px-1 text-xs text-amber-700">Tamamlanmamış</span>
                       )}
                     </td>
@@ -370,8 +377,9 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
           </table>
         </div>
         <p className="mt-2 text-xs text-slate-400">
-          Eşleştirmeler her içe aktarma/düzenleme sonrası FIFO kuralıyla otomatik yeniden hesaplanır: peşin ödemeler en eski
-          peşin borçtan, vadeli ödemeler en erken vadeli konsinye taksitinden düşülür. Son güncelleme: {trDateTime(new Date().toISOString())}
+          Eşleştirme kuralı: tüm ödemeler tek havuzda toplanır, önce peşin borçlar (en eski önce), sonra en yakın vadeli
+          konsinye taksitleri kapatılır. ALC ve KDV 1/5 kayıtları tahsise girmez. Her içe aktarma/düzenleme sonrası
+          otomatik yeniden hesaplanır. Son güncelleme: {trDateTime(new Date().toISOString())}
         </p>
       </section>
     </div>

@@ -3,13 +3,13 @@ import MonthMatrix from '@/components/MonthMatrix'
 import StatCard from '@/components/StatCard'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { addMonths, eur, monthOf, todayISO, trMonth } from '@/lib/format'
-import { currentRunId, openInstallments } from '@/lib/queries'
+import { currentRunId, pazarlamaciByFirm, scopeInstallments } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
-// Peşin borçlarda 'vade' = irsaliye tarihi; tablo aynı takvim matrisiyle,
-// yaşlandırma şeridi eklenerek sunulur.
+// Peşin borçlarda 'vade' = irsaliye tarihi; tablo aynı BORÇ/ÖDEME/KALAN
+// matrisiyle, yaşlandırma şeridi eklenerek sunulur.
 
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(b) - Date.parse(a)) / 86400000)
@@ -23,17 +23,22 @@ export default async function PesinPage({ searchParams }: { searchParams: Promis
   const month = /^\d{4}-\d{2}$/.test(params.ay ?? '') ? params.ay! : monthOf(todayISO())
 
   const runId = await currentRunId(supabase)
-  const rows = runId ? await openInstallments(supabase, 'PESIN') : []
+  const [rows, sorumlu] = runId
+    ? await Promise.all([scopeInstallments(supabase, 'PESIN'), pazarlamaciByFirm(supabase)])
+    : [[], new Map<string, string>()]
 
   const today = todayISO()
   const buckets = { b0_30: 0, b31_60: 0, b61_90: 0, b90p: 0 }
   for (const r of rows) {
+    if (r.remaining_eur_cents <= 0) continue
     const age = daysBetween(r.due_date, today)
     if (age <= 30) buckets.b0_30 += r.remaining_eur_cents
     else if (age <= 60) buckets.b31_60 += r.remaining_eur_cents
     else if (age <= 90) buckets.b61_90 += r.remaining_eur_cents
     else buckets.b90p += r.remaining_eur_cents
   }
+  const totalKalan = rows.reduce((s, r) => s + r.remaining_eur_cents, 0)
+  const totalOdenen = rows.reduce((s, r) => s + r.paid_eur_cents, 0)
 
   return (
     <div>
@@ -41,8 +46,9 @@ export default async function PesinPage({ searchParams }: { searchParams: Promis
         <div>
           <h1 className="text-lg font-bold text-slate-900">Peşin Borçlar</h1>
           <p className="mt-1 text-sm text-slate-500">
-            İrsaliye tarihine göre bekleyen peşin ödemeler — toplam:{' '}
-            <strong className="tabular-nums">{eur(rows.reduce((s, r) => s + r.remaining_eur_cents, 0))}</strong>
+            İrsaliye tarihine göre — Ödenen:{' '}
+            <strong className="tabular-nums text-emerald-600">{eur(totalOdenen)}</strong> · Kalan:{' '}
+            <strong className="tabular-nums">{eur(totalKalan)}</strong>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -74,7 +80,7 @@ export default async function PesinPage({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="mt-4">
-        <MonthMatrix rows={rows} month={month} />
+        <MonthMatrix rows={rows} month={month} sorumluByFirm={sorumlu} />
       </div>
     </div>
   )

@@ -13,11 +13,13 @@ vade tarihi bazında takvim görünümünde izler, ödemeleri FIFO kuralıyla bo
 - **31/12 kuralı:** 31 Aralık tarihli irsaliyeler içe aktarılır ama borç hesabına **hiç katılmaz**.
 - **Ödeme içe aktarma (.xlsx):** "Bağlanan Kurlar" yedeğinin PEŞİN ve VADELİ sayfalarını okur.
   `ALC-` (eski alacak kayıtları) ve `TAMAMLANMAMIŞ` kayıtlar bilgi olarak saklanır, tahsise girmez.
-- **FIFO mutabakat (EUR üzerinden):** PEŞİN ödemeler en eski peşin borçtan; VADELİ ödemeler en erken
-  vadeli konsinye taksitinden düşülür. Fazla ödeme **alacak** olur, kendi tarafında kalır ve bir
-  sonraki borcu otomatik kapatır. Taraflar arası geçiş yoktur.
+- **Tek havuz mutabakatı (EUR üzerinden):** Firmanın TÜM ödemeleri (hangi sayfadan gelirse gelsin)
+  tek havuzda toplanır; **önce peşin borçlar** (en eski önce), **sonra en yakın vadeli konsinye
+  taksitleri** kapatılır. Fazla ödeme **alacak** olur ve bir sonraki borcu otomatik kapatır.
+  **KDV 1/5 ödemeleri** (durumu EVET / açıklaması 5TE1) bilgi olarak saklanır, mal borcu tahsisine girmez.
 - **Takvim görünümleri:** Konsinye/Konsinye Peşin ayrı, Peşin ayrı tabloda; satır = firma,
-  sütun = vade günleri, devreden/gecikmiş sütunu ve toplamlarla.
+  her vade günü için **BORÇ | ÖDEME | KALAN** üçlüsü, SORUMLU (pazarlamacı) sütunu,
+  devreden/gecikmiş ve firma toplamlarıyla — mevcut Excel tablonuzla aynı düzen.
 - **Tahsilat Yöneticisi düzenlemeleri:** İrsaliye iptali, tutar/tip/vade değişikliği, taksitleri elle
   düzenleme. Her değişiklik **denetim kaydına** işlenir; aynı dosya yeniden yüklendiğinde
   düzenlemeler **asla ezilmez**.
@@ -55,9 +57,12 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 
 ### 4) Veritabanı şemasını kurun
 1. [supabase.com/dashboard](https://supabase.com/dashboard) → projeniz → sol menüden **SQL Editor**.
-2. Bu depodaki **`supabase/migrations/0001_init.sql`** dosyasının içeriğinin TAMAMINI kopyalayıp
-   yapıştırın → **Run**.
-3. "Success" görmelisiniz. (Dosya güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
+2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: önce **`supabase/migrations/0001_init.sql`**
+   içeriğinin tamamını yapıştırıp **Run**, sonra aynı şekilde **`0002_havuz_tahsis.sql`**.
+3. Her ikisinde de "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
+
+> **Sistemi daha önce kurduysanız (güncelleme):** yalnız `0002_havuz_tahsis.sql`'i çalıştırın,
+> ardından uygulamada **Pano → Yeniden Hesapla**'ya basın. Dosyaları yeniden yüklemeniz gerekmez.
 
 ### 5) Kurulum sihirbazını çalıştırın
 1. Tarayıcıda `https://<vercel-adresiniz>/setup` sayfasını açın.

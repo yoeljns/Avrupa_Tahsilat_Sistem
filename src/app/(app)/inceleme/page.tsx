@@ -28,6 +28,8 @@ interface ReviewInvoice {
   plan_parse_note: string | null
   is_31_12: boolean
   is_cancelled: boolean
+  is_excluded_firm: boolean
+  excluded_override: boolean | null
   fisno_nonstandard: boolean
   needs_review: boolean
   raw_changed_after_override: boolean
@@ -47,17 +49,19 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
   const params = await searchParams
   const tab = TABS.some((t) => t.key === params.sekme) ? params.sekme! : 'siniflandirma'
 
-  const invoices = await fetchAll<ReviewInvoice>((from, to) =>
+  const invoicesRaw = await fetchAll<ReviewInvoice>((from, to) =>
     supabase
       .from('v_invoices_effective')
       .select(
-        'id, fis_no, firm_id, firm_code, firm_name, invoice_date, belge_no_raw, odeme_plani_raw, amount_eur_cents, sale_type, suggested_sale_type, classify_reason, plan_parse_status, plan_parse_note, is_31_12, is_cancelled, fisno_nonstandard, needs_review, raw_changed_after_override',
+        'id, fis_no, firm_id, firm_code, firm_name, invoice_date, belge_no_raw, odeme_plani_raw, amount_eur_cents, sale_type, suggested_sale_type, classify_reason, plan_parse_status, plan_parse_note, is_31_12, is_cancelled, is_excluded_firm, excluded_override, fisno_nonstandard, needs_review, raw_changed_after_override',
       )
       .or('needs_review.eq.true,is_31_12.eq.true,raw_changed_after_override.eq.true')
       .order('invoice_date', { ascending: false })
       .range(from, to),
   )
 
+  // Takip dışı firmaların irsaliyeleri inceleme kuyruğuna GİRMEZ
+  const invoices = invoicesRaw.filter((i) => !(i.excluded_override ?? i.is_excluded_firm))
   const active = invoices.filter((i) => !i.is_cancelled)
   const classification = active.filter((i) => i.sale_type === 'OTHER' && !i.is_31_12)
   const planIssues = active.filter((i) => i.plan_parse_status === 'unparsed' && i.sale_type !== 'OTHER' && !i.is_31_12)
