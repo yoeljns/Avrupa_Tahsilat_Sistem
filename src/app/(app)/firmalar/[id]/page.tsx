@@ -142,7 +142,6 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
     else instByInvoice.set(t.invoice_id, [t])
   }
   const invoiceById = new Map(invoices.map((i) => [i.id, i]))
-  const paymentById = new Map(payments.map((p) => [p.id, p]))
   const allocByPayment = new Map<string, AllocRow[]>()
   for (const a of allocations) {
     const arr = allocByPayment.get(a.payment_id)

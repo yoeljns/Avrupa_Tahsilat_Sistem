@@ -80,7 +80,17 @@ export default async function DashboardPage() {
           <span>
             Son mutabakat: {trDateTime(runInfo.data?.started_at)} ({runInfo.data?.triggered_by ?? '—'})
           </span>
-          {staff && <RecomputeButton />}
+          {staff && (
+            <>
+              <a href="/api/export/borclar" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Borç Raporu (Excel)
+              </a>
+              <a href="/api/export/tahsilat-detay" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Tahsilat Detayı (Excel)
+              </a>
+              <RecomputeButton />
+            </>
+          )}
         </div>
       </div>
 
