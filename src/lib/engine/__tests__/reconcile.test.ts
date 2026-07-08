@@ -210,6 +210,71 @@ describe('reconcile — tek havuz: önce peşin, sonra en yakın vade', () => {
     expect(JSON.stringify(a.balances)).toBe(JSON.stringify(b.balances))
   })
 
+  it('KDV ödemesi: tamamı hedef irsaliyeden düşer, kalan taksitlendirilmiş gibi dağılır', () => {
+    // 12.000 € irsaliye, 3 taksit (4.000'er). KDV ödemesi 1.200 €.
+    // "Toplamdan düş sonra taksitlendir": (12.000-1.200)/3 = 3.600'er kalan.
+    const out = reconcile({
+      installments: [
+        inst({ id: 'T1', invoiceId: 'INV1', dueDate: '2026-03-05', amountCents: 400000 }),
+        inst({ id: 'T2', invoiceId: 'INV1', dueDate: '2026-04-05', amountCents: 400000, seq: 2 }),
+        inst({ id: 'T3', invoiceId: 'INV1', dueDate: '2026-05-05', amountCents: 400000, seq: 3 }),
+      ],
+      payments: [pay({ id: 'K1', amountCents: 120000, isKdv: true, targetInvoiceIds: ['INV1'] })],
+      asOf: '2026-07-08',
+    })
+    expect(out.remainingByInstallment.get('T1')).toBe(360000)
+    expect(out.remainingByInstallment.get('T2')).toBe(360000)
+    expect(out.remainingByInstallment.get('T3')).toBe(360000)
+    expect(out.unallocatedByPayment.get('K1')).toBe(0)
+    expect(out.balances[0].creditCents).toBe(0)
+  })
+
+  it('KDV ödemesi havuz sırasını atlar: peşin borç açıkken bile hedef irsaliyeye gider', () => {
+    const out = reconcile({
+      installments: [
+        inst({ id: 'P', side: 'PESIN', invoiceId: 'INVP', dueDate: '2026-01-05', invoiceDate: '2026-01-05', amountCents: 5000 }),
+        inst({ id: 'V', side: 'VADELI', invoiceId: 'INVV', dueDate: '2026-06-05', amountCents: 10000 }),
+      ],
+      payments: [pay({ id: 'K1', amountCents: 2000, isKdv: true, targetInvoiceIds: ['INVV'] })],
+      asOf: '2026-07-08',
+    })
+    expect(out.remainingByInstallment.get('P')).toBe(5000) // peşin borca dokunmadı
+    expect(out.remainingByInstallment.get('V')).toBe(8000)
+    expect(out.allocations).toEqual([expect.objectContaining({ paymentId: 'K1', installmentId: 'V', amountCents: 2000 })])
+  })
+
+  it('çok irsaliyeli KDV ödemesi hedeflere kalanlarıyla oransal bölünür', () => {
+    const out = reconcile({
+      installments: [
+        inst({ id: 'A', invoiceId: 'IA', dueDate: '2026-03-05', amountCents: 30000 }),
+        inst({ id: 'B', invoiceId: 'IB', dueDate: '2026-04-05', amountCents: 10000 }),
+      ],
+      payments: [pay({ id: 'K1', amountCents: 4000, isKdv: true, targetInvoiceIds: ['IA', 'IB'] })],
+      asOf: '2026-07-08',
+    })
+    // 30k:10k oranı → 3.000 + 1.000
+    expect(out.remainingByInstallment.get('A')).toBe(27000)
+    expect(out.remainingByInstallment.get('B')).toBe(9000)
+  })
+
+  it('KDV ödemesi hedefi aşarsa artan alacak olur; havuz fazı sonra koşar', () => {
+    const out = reconcile({
+      installments: [
+        inst({ id: 'V', invoiceId: 'IV', dueDate: '2026-03-05', amountCents: 1000 }),
+        inst({ id: 'W', invoiceId: 'IW', dueDate: '2026-04-05', amountCents: 5000 }),
+      ],
+      payments: [
+        pay({ id: 'K1', amountCents: 1500, isKdv: true, targetInvoiceIds: ['IV'] }),
+        pay({ id: 'P1', amountCents: 2000 }),
+      ],
+      asOf: '2026-07-08',
+    })
+    expect(out.remainingByInstallment.get('V')).toBe(0)
+    expect(out.unallocatedByPayment.get('K1')).toBe(500) // hedef doldu, artan alacak
+    expect(out.remainingByInstallment.get('W')).toBe(3000) // havuz W'yi kapatmaya devam etti
+    expect(out.balances[0].creditCents).toBe(500)
+  })
+
   it('gerçek senaryo: kuruşu kuruşuna eşleşen peşin ödeme (06 K07 örneği)', () => {
     const out = reconcile({
       installments: [inst({ id: 'A', side: 'PESIN', dueDate: '2026-01-06', amountCents: 541682 })],

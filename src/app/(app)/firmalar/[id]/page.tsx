@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import InvoiceActions from '@/components/InvoiceActions'
+import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { fetchAll } from '@/lib/db'
 import { SALE_TYPE_LABELS, eur, todayISO, trDate, trDateTime } from '@/lib/format'
@@ -83,7 +84,12 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
 
   const runId = await currentRunId(supabase)
 
-  const [invoices, installments, payments, balances] = await Promise.all([
+  let invoices: InvoiceRow[]
+  let installments: InstRow[]
+  let payments: PayRow[]
+  let balances: BalanceRow[]
+  try {
+    ;[invoices, installments, payments, balances] = await Promise.all([
     fetchAll<InvoiceRow>((from, to) =>
       supabase
         .from('v_invoices_effective')
@@ -124,7 +130,11 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
             .range(from, to),
         )
       : Promise.resolve([] as BalanceRow[]),
-  ])
+    ])
+  } catch (e) {
+    if (isMissingRelationError(e)) return <MigrationNeeded />
+    throw e
+  }
 
   const allocations = runId
     ? await fetchAll<AllocRow>((from, to) =>
@@ -341,8 +351,20 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                       {p.islem_kodu}
                       {p.is_alc && <span className="ml-1 rounded bg-slate-200 px-1 text-xs text-slate-600" title="Eski sistemin alacak kaydı — tahsise girmez">ALC</span>}
                       {p.is_kdv && (
-                        <span className="ml-1 rounded bg-violet-100 px-1 text-xs text-violet-700" title="KDV 1/5 ön ödemesi — mal borcu tahsisine girmez">
-                          KDV 1/5
+                        <span
+                          className={
+                            'ml-1 rounded px-1 text-xs ' +
+                            ((allocByPayment.get(p.id)?.length ?? 0) > 0
+                              ? 'bg-violet-100 text-violet-700'
+                              : 'bg-amber-100 text-amber-700')
+                          }
+                          title={
+                            (allocByPayment.get(p.id)?.length ?? 0) > 0
+                              ? 'KDV 1/5 ödemesi — referansındaki irsaliyeden düşüldü'
+                              : 'KDV 1/5 ödemesi — irsaliye referansı çözülemedi, tahsise girmedi'
+                          }
+                        >
+                          {(allocByPayment.get(p.id)?.length ?? 0) > 0 ? 'KDV 1/5' : 'KDV — eşleşmedi'}
                         </span>
                       )}
                       {!p.is_alc && !p.is_kdv && !p.allocatable && (
@@ -377,9 +399,10 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
           </table>
         </div>
         <p className="mt-2 text-xs text-slate-400">
-          Eşleştirme kuralı: tüm ödemeler tek havuzda toplanır, önce peşin borçlar (en eski önce), sonra en yakın vadeli
-          konsinye taksitleri kapatılır. ALC ve KDV 1/5 kayıtları tahsise girmez. Her içe aktarma/düzenleme sonrası
-          otomatik yeniden hesaplanır. Son güncelleme: {trDateTime(new Date().toISOString())}
+          Eşleştirme kuralı: KDV 1/5 ödemeleri referansındaki (son 4 hane) irsaliyeden tamamıyla düşülür; diğer tüm
+          ödemeler tek havuzda toplanır, önce peşin borçlar (en eski önce), sonra en yakın vadeli konsinye taksitleri
+          kapatılır. ALC kayıtları ve referansı çözülemeyen KDV ödemeleri tahsise girmez. Her içe aktarma/düzenleme
+          sonrası otomatik yeniden hesaplanır. Son güncelleme: {trDateTime(new Date().toISOString())}
         </p>
       </section>
     </div>

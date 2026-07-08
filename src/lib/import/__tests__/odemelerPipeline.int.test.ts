@@ -48,6 +48,7 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     await pool.query(AUTH_STUB)
     await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0001_init.sql'), 'utf8'))
     await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0002_havuz_tahsis.sql'), 'utf8'))
+    await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0003_kdv_eslestirme.sql'), 'utf8'))
 
     // Önce irsaliyeler
     const parsedIrs = parseIrsaliyeXls(readFileSync(IRS!))
@@ -124,22 +125,62 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
       where not p.is_complete`)
     expect(inc[0].n).toBe(0)
 
-    // KDV 1/5 ödemeleri (36 adet) tahsise girmedi
+    // KDV 1/5 ödemeleri (36 adet): 32'si referansındaki irsaliyeyle eşleşip
+    // TAM TUTARIYLA tahsis edilir; 4'ü (referanssız/geçersiz) tahsise girmez.
     const { rows: kdvCount } = await pool.query(`select count(*)::int as n from payments where is_kdv`)
     expect(kdvCount[0].n).toBe(36)
-    const { rows: kdvAlloc } = await pool.query(`
+    const { rows: kdvMatched } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
+      select count(*)::int as n from (
+        select p.id
+        from payments p
+        join allocations a on a.payment_id = p.id and a.run_id = (select run_id from cur)
+        where p.is_kdv
+        group by p.id, p.doviz_eur_cents
+        having sum(a.amount_eur_cents) = p.doviz_eur_cents
+      ) x`)
+    expect(kdvMatched[0].n).toBe(32)
+    const { rows: kdvNoAlloc } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
       select count(*)::int as n
-      from allocations a join payments p on p.id = a.payment_id
-      where p.is_kdv`)
-    expect(kdvAlloc[0].n).toBe(0)
+      from payments p
+      where p.is_kdv and not exists (
+        select 1 from allocations a where a.payment_id = p.id and a.run_id = (select run_id from cur)
+      )`)
+    expect(kdvNoAlloc[0].n).toBe(4)
 
-    // Peşin önceliği: bir firmada VADELİ taksite tahsis varsa, o firmanın
-    // TÜM peşin taksitleri tamamen kapanmış olmalı (havuz önce peşini öder)
+    // HTK örneği: ISL-20260116-6E27 (971,96 €, ref '0042') → yalnız son-4'ü 0042 olan irsaliye
+    const { rows: htk } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
+      select distinct i.fis_no, sum(a.amount_eur_cents)::bigint as s
+      from allocations a
+      join payments p on p.id = a.payment_id
+      join invoices i on i.id = a.invoice_id
+      where a.run_id = (select run_id from cur) and p.islem_kodu = 'ISL-20260116-6E27'
+      group by i.fis_no`)
+    expect(htk).toHaveLength(1)
+    expect(htk[0].fis_no.endsWith('0042')).toBe(true)
+    expect(Number(htk[0].s)).toBe(97196)
+
+    // KARSEL çok referanslı KDV: 4 irsaliyeye bölünür, toplam 9.791,87 €
+    const { rows: karsel } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
+      select count(distinct a.invoice_id)::int as inv_n, sum(a.amount_eur_cents)::bigint as s
+      from allocations a
+      join payments p on p.id = a.payment_id
+      where a.run_id = (select run_id from cur) and p.islem_kodu = 'ISL-20260129-E1D6'`)
+    expect(karsel[0].inv_n).toBe(4)
+    expect(Number(karsel[0].s)).toBe(979187)
+
+    // Peşin önceliği (KDV hedefli tahsisler hariç): bir firmada KDV-olmayan
+    // ödemeden VADELİ taksite tahsis varsa, o firmanın TÜM peşin taksitleri kapalı olmalı
     const { rows: priorityBreak } = await pool.query(`
       with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run'),
       vadeli_firms as (
-        select distinct firm_id from allocations
-        where run_id = (select run_id from cur) and side = 'VADELI'
+        select distinct a.firm_id
+        from allocations a
+        join payments p on p.id = a.payment_id
+        where a.run_id = (select run_id from cur) and a.side = 'VADELI' and not p.is_kdv
       )
       select count(*)::int as n
       from installments t

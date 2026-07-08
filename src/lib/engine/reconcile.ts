@@ -10,18 +10,49 @@ import type {
 // Mutabakat motoru — SAF ve DETERMİNİSTİK.
 //
 // Kural (iş sahibinin tarifi): "Gelen ödemeleri al, önce peşinleri ödet,
-// sonra kalanı en yakın vadeye bölerek ilerle."
+// sonra kalanı en yakın vadeye bölerek ilerle. KDV ödemesinin tamamı
+// eşleşen irsaliyeden düşer, sonra taksitlendirilir."
 //
-//  * Firma başına TEK ödeme havuzu vardır — ödemenin PEŞİN mi VADELİ mi
-//    sayfasından geldiği tahsisi ETKİLEMEZ (yalnız bilgi olarak saklanır).
-//  * Borç kuyruğu: önce TÜM PEŞİN borçları (en eski irsaliye önce),
-//    sonra VADELİ (konsinye) taksitler en yakın vadeden ileriye.
-//  * Ödemeler tarih sırasıyla havuza girer; iki işaretçili FIFO ile kuyruk kapatılır.
-//  * Artan ödeme firmanın ALACAĞIDIR; her yeniden hesapta havuz baştan
-//    koştuğu için alacak, sonraki borcu kendiliğinden kapatır.
+// İki faz:
+//  1) KDV FAZI — KDV 1/5 ödemeleri havuza girmez; her biri referans verdiği
+//     irsaliye(ler)e gider. Tutar, hedef irsaliyelere kalanlarıyla oransal,
+//     irsaliye içinde de taksitlere oransal dağıtılır — bu, "toplamdan düş,
+//     sonra taksitlendir" ile aynı kalanları üretir.
+//  2) HAVUZ FAZI — kalan borçlar üzerinden: firma başına TEK ödeme havuzu
+//     (ödemenin PEŞİN/VADELİ sayfası önemsiz), önce TÜM PEŞİN borçları
+//     (en eski önce), sonra VADELİ taksitler en yakın vadeden ileriye, FIFO.
+//  * Artan ödeme firmanın ALACAĞIDIR; her yeniden hesapta baştan koşulduğu
+//    için alacak, sonraki borcu kendiliğinden kapatır.
 //
-// Çağıran taraf filtreleri uygular: iptal/31-12/hariç firma/OTHER irsaliyeler
-// ve tahsise kapalı ödemeler (ALC-, TAMAMLANMAMIŞ, KDV 1/5) motora hiç gelmez.
+// Çağıran taraf filtreleri uygular: iptal/31-12/hariç firma/OTHER irsaliyeler,
+// ALC- ve TAMAMLANMAMIŞ ödemeler ile İRSALİYE EŞLEŞMEYEN KDV ödemeleri
+// motora hiç gelmez.
+
+/**
+ * Tutarı, üst sınırlarına (caps) oransal dağıtır — deterministik.
+ * 1. geçiş: taban paylar (floor); 2. geçiş: kalan kuruşlar sırayla, sınır aşılmadan.
+ * Toplam dağıtım = min(amount, Σcaps).
+ */
+function distributeProRata(amount: number, caps: number[]): number[] {
+  const out = new Array<number>(caps.length).fill(0)
+  const total = caps.reduce((s, c) => s + Math.max(0, c), 0)
+  if (total <= 0 || amount <= 0) return out
+  const usable = Math.min(amount, total)
+  let assigned = 0
+  for (let i = 0; i < caps.length; i++) {
+    const cap = Math.max(0, caps[i])
+    const share = Math.min(cap, Math.floor((usable * cap) / total))
+    out[i] = share
+    assigned += share
+  }
+  let left = usable - assigned
+  for (let i = 0; i < caps.length && left > 0; i++) {
+    const add = Math.min(left, Math.max(0, caps[i]) - out[i])
+    out[i] += add
+    left -= add
+  }
+  return out
+}
 
 export function reconcile(input: {
   installments: EngineInstallment[]
@@ -71,9 +102,58 @@ export function reconcile(input: {
     )
 
     const instRemaining = queue.map((i) => Math.max(0, i.amountCents))
-    let ii = 0
+    const indicesByInvoice = new Map<string, number[]>()
+    for (let k = 0; k < queue.length; k++) {
+      const arr = indicesByInvoice.get(queue[k].invoiceId)
+      if (arr) arr.push(k)
+      else indicesByInvoice.set(queue[k].invoiceId, [k])
+    }
 
-    for (const pay of g.payments) {
+    // ---- 1. FAZ: KDV ödemeleri — yalnız hedef irsaliyelerden düşer ----
+    const kdvPayments = g.payments.filter((p) => p.isKdv)
+    const poolPayments = g.payments.filter((p) => !p.isKdv)
+
+    for (const pay of kdvPayments) {
+      const targetIds = (pay.targetInvoiceIds ?? []).filter((id) => indicesByInvoice.has(id))
+      let payRemaining = pay.amountCents
+      if (targetIds.length > 0 && payRemaining > 0) {
+        // Ödemeyi hedef irsaliyelere kalan tutarlarıyla oransal böl
+        const invoiceCaps = targetIds.map((id) =>
+          indicesByInvoice.get(id)!.reduce((s, k) => s + instRemaining[k], 0),
+        )
+        const invoiceShares = distributeProRata(payRemaining, invoiceCaps)
+        for (let t = 0; t < targetIds.length; t++) {
+          let share = invoiceShares[t]
+          if (share <= 0) continue
+          // İrsaliye içinde taksitlere oransal dağıt — "toplamdan düş, sonra
+          // taksitlendir" ile aynı kalanları üretir
+          const idxs = indicesByInvoice.get(targetIds[t])!
+          const instShares = distributeProRata(share, idxs.map((k) => instRemaining[k]))
+          for (let j = 0; j < idxs.length; j++) {
+            const take = instShares[j]
+            if (take <= 0) continue
+            const k = idxs[j]
+            const inst = queue[k]
+            allocations.push({
+              paymentId: pay.id,
+              installmentId: inst.id,
+              invoiceId: inst.invoiceId,
+              firmId,
+              side: inst.side,
+              amountCents: take,
+            })
+            instRemaining[k] -= take
+            share -= take
+            payRemaining -= take
+          }
+        }
+      }
+      unallocatedByPayment.set(pay.id, payRemaining)
+    }
+
+    // ---- 2. FAZ: havuz — önce peşin, sonra en yakın vade ----
+    let ii = 0
+    for (const pay of poolPayments) {
       let payRemaining = pay.amountCents
       while (payRemaining > 0 && ii < queue.length) {
         if (instRemaining[ii] <= 0) {

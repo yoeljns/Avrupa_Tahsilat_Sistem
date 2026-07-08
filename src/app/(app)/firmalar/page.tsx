@@ -1,6 +1,7 @@
 import Link from 'next/link'
+import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import { eur, trDate } from '@/lib/format'
-import { allFirms, balancesAtRun, currentRunId, excludedCodeSet } from '@/lib/queries'
+import { allFirms, balancesAtRun, currentRunId, excludedCodeSet, type BalanceRow } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -8,7 +9,13 @@ export const dynamic = 'force-dynamic'
 export default async function FirmalarPage() {
   const supabase = await createServerSupabase()
   const [firms, runId, excluded] = await Promise.all([allFirms(supabase), currentRunId(supabase), excludedCodeSet(supabase)])
-  const balances = runId ? await balancesAtRun(supabase, runId) : []
+  let balances: BalanceRow[] = []
+  try {
+    if (runId) balances = await balancesAtRun(supabase, runId)
+  } catch (e) {
+    if (isMissingRelationError(e)) return <MigrationNeeded />
+    throw e
+  }
 
   const byFirm = new Map<string, { pesin: number; vadeli: number; credit: number; nextDue: string | null }>()
   for (const b of balances) {

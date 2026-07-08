@@ -48,6 +48,10 @@ export interface EnginePayment {
   /** ISO tarih/zaman (sıralama için) */
   dateISO: string
   amountCents: number
+  /** KDV 1/5 ödemesi: havuza girmez, yalnız hedef irsaliyelerden düşülür */
+  isKdv?: boolean
+  /** KDV ödemesinin referans verdiği irsaliye id'leri (yükleyici çözer) */
+  targetInvoiceIds?: string[]
 }
 
 export interface AllocationOut {

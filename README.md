@@ -16,7 +16,10 @@ vade tarihi bazında takvim görünümünde izler, ödemeleri FIFO kuralıyla bo
 - **Tek havuz mutabakatı (EUR üzerinden):** Firmanın TÜM ödemeleri (hangi sayfadan gelirse gelsin)
   tek havuzda toplanır; **önce peşin borçlar** (en eski önce), **sonra en yakın vadeli konsinye
   taksitleri** kapatılır. Fazla ödeme **alacak** olur ve bir sonraki borcu otomatik kapatır.
-  **KDV 1/5 ödemeleri** (durumu EVET / açıklaması 5TE1) bilgi olarak saklanır, mal borcu tahsisine girmez.
+  **KDV 1/5 ödemeleri** havuza girmez: ödemenin yanındaki irsaliye referansı (son 4 hane —
+  'KDV FATURA REFERANSI' kolonu veya açıklamadaki `0042-5TE1` deseni) ile **eşleşen irsaliyeden
+  tamamı düşülür, kalan tutar taksitlendirilmiş kabul edilir**. Referansı çözülemeyen KDV
+  ödemeleri tahsise girmez ve panelde "eşleşmedi" olarak görünür.
 - **Takvim görünümleri:** Konsinye/Konsinye Peşin ayrı, Peşin ayrı tabloda; satır = firma,
   her vade günü için **BORÇ | ÖDEME | KALAN** üçlüsü, SORUMLU (pazarlamacı) sütunu,
   devreden/gecikmiş ve firma toplamlarıyla — mevcut Excel tablonuzla aynı düzen.
@@ -57,12 +60,13 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 
 ### 4) Veritabanı şemasını kurun
 1. [supabase.com/dashboard](https://supabase.com/dashboard) → projeniz → sol menüden **SQL Editor**.
-2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: önce **`supabase/migrations/0001_init.sql`**
-   içeriğinin tamamını yapıştırıp **Run**, sonra aynı şekilde **`0002_havuz_tahsis.sql`**.
-3. Her ikisinde de "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
+2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: **`supabase/migrations/0001_init.sql`** →
+   **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** (her birinin içeriğini yapıştırıp **Run**).
+3. Hepsinde "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
 
-> **Sistemi daha önce kurduysanız (güncelleme):** yalnız `0002_havuz_tahsis.sql`'i çalıştırın,
-> ardından uygulamada **Pano → Yeniden Hesapla**'ya basın. Dosyaları yeniden yüklemeniz gerekmez.
+> **Sistemi daha önce kurduysanız (güncelleme):** yalnız henüz çalıştırmadığınız migration
+> dosyalarını (örn. `0002` ve `0003`) sırayla çalıştırın, ardından uygulamada
+> **Pano → Yeniden Hesapla**'ya basın. Dosyaları yeniden yüklemeniz gerekmez.
 
 ### 5) Kurulum sihirbazını çalıştırın
 1. Tarayıcıda `https://<vercel-adresiniz>/setup` sayfasını açın.

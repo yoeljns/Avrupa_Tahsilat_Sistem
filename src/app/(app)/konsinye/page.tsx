@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import MonthMatrix from '@/components/MonthMatrix'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { addMonths, eur, monthOf, todayISO, trMonth } from '@/lib/format'
@@ -15,9 +16,14 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
   const month = /^\d{4}-\d{2}$/.test(params.ay ?? '') ? params.ay! : monthOf(todayISO())
 
   const runId = await currentRunId(supabase)
-  const [rows, sorumlu] = runId
-    ? await Promise.all([scopeInstallments(supabase, 'VADELI'), pazarlamaciByFirm(supabase)])
-    : [[], new Map<string, string>()]
+  let rows: Awaited<ReturnType<typeof scopeInstallments>> = []
+  let sorumlu = new Map<string, string>()
+  try {
+    if (runId) [rows, sorumlu] = await Promise.all([scopeInstallments(supabase, 'VADELI'), pazarlamaciByFirm(supabase)])
+  } catch (e) {
+    if (isMissingRelationError(e)) return <MigrationNeeded />
+    throw e
+  }
 
   const today = todayISO()
   const totalKalan = rows.reduce((s, r) => s + r.remaining_eur_cents, 0)

@@ -128,7 +128,9 @@ export async function GET() {
         p.is_alc
           ? 'ALC (eski sistem alacak kaydı)'
           : p.is_kdv
-            ? 'KDV 1/5 ödemesi (tahsise girmez)'
+            ? allocated > 0
+              ? 'KDV 1/5 — kısmen eşleşti'
+              : 'KDV 1/5 — irsaliye eşleşmedi'
             : p.allocatable
               ? 'Alacak'
               : 'Tahsise kapalı',

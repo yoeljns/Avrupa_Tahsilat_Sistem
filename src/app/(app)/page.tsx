@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import RecomputeButton from '@/components/RecomputeButton'
 import StatCard from '@/components/StatCard'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
@@ -39,11 +40,19 @@ export default async function DashboardPage() {
     )
   }
 
-  const [balances, vadeli, runInfo] = await Promise.all([
-    balancesAtRun(supabase, runId),
-    scopeInstallments(supabase, 'VADELI'),
-    supabase.from('recon_runs').select('started_at, triggered_by').eq('id', runId).maybeSingle(),
-  ])
+  let balances: Awaited<ReturnType<typeof balancesAtRun>>
+  let vadeli: Awaited<ReturnType<typeof scopeInstallments>>
+  let runInfo: { data: { started_at: string; triggered_by: string | null } | null }
+  try {
+    ;[balances, vadeli, runInfo] = await Promise.all([
+      balancesAtRun(supabase, runId),
+      scopeInstallments(supabase, 'VADELI'),
+      supabase.from('recon_runs').select('started_at, triggered_by').eq('id', runId).maybeSingle(),
+    ])
+  } catch (e) {
+    if (isMissingRelationError(e)) return <MigrationNeeded />
+    throw e
+  }
 
   const pesinOpen = balances.reduce((s, b) => s + b.pesin_open_eur_cents, 0)
   const vadeliOpen = balances.reduce((s, b) => s + b.vadeli_open_eur_cents, 0)
@@ -122,7 +131,7 @@ export default async function DashboardPage() {
         />
         <StatCard title="7 Gün İçinde Vadesi Gelen" value={eur(upcoming7)} tone={upcoming7 > 0 ? 'amber' : 'default'} />
         <StatCard title="30 Gün İçinde Vadesi Gelen" value={eur(upcoming30)} />
-        <StatCard title="Toplam Tahsilat" value={eur(totalPaid)} sub="Tahsise giren ödemeler (KDV 1/5 hariç)" />
+        <StatCard title="Toplam Tahsilat" value={eur(totalPaid)} sub="Tahsise giren ödemeler (eşleşen KDV 1/5 dahil)" />
         {staff && (
           <Link href="/inceleme" className="block">
             <StatCard

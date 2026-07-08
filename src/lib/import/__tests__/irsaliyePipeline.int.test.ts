@@ -92,6 +92,7 @@ describe.skipIf(!SOCKET || !FILE)('irsaliye içe aktarma boru hattı (yerel Post
     await pool.query(AUTH_STUB)
     await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0001_init.sql'), 'utf8'))
     await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0002_havuz_tahsis.sql'), 'utf8'))
+    await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations/0003_kdv_eslestirme.sql'), 'utf8'))
     parsed = parseIrsaliyeXls(readFileSync(FILE!))
   }, 60000)
 
