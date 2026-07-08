@@ -149,12 +149,12 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
           or b.credit_eur_cents <> b.total_paid_eur_cents - coalesce(a.allocated,0))`)
     expect(broken[0].n).toBe(0)
 
-    // Hariç firmaların ödemeleri tahsise girmedi
+    // Hariç firmaların ödemeleri tahsise girmedi (katlanmış eşleşme)
     const { rows: exclPay } = await pool.query(`
       select count(*)::int as n
       from allocations a
       join firms f on f.id = a.firm_id
-      join excluded_firm_codes e on e.code_norm = f.code_norm`)
+      join excluded_firm_codes e on fold_tr(e.code_norm) = fold_tr(f.code_norm)`)
     expect(exclPay[0].n).toBe(0)
 
     // Gerçek örnek: 06 K07 KUZEY'in ilk peşin ödemesi (5416,82 €) ilk peşin

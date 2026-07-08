@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { Pool, types } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { normalizeFirmCode } from '@/lib/engine/normalize'
+import { foldFirmCodeForExclusion } from '@/lib/engine/normalize'
 import { chunkedWrite, fetchAll } from '@/lib/db'
 import { commitIrsaliyeBatch } from '../commitIrsaliye'
 import { diffIrsaliye } from '../diff'
@@ -43,7 +43,7 @@ describe.skipIf(!SOCKET || !FILE)('irsaliye içe aktarma boru hattı (yerel Post
   const EXCLUDED = new Set(
     `01 K01|10 K01|14 Y01|33 K02|33 Y01|34 K56|34 S01|34 T32|37 K01|37 K02|41 Y01|41 Y02|45 Y01|52 C02|54 C03|55 K05|81 D02|99 A16|99 A19|99 A20|99 C02|99 D01|99 D02|99 E01|99 G03|99 H01|99 I03|99 K06|99 K07|99 K08|99 N01|99 P02|99 P04|99 R01|99 R02|99 S01|99 T02|99 T03|99 T07|99 T11|99 V03|99 Y02`
       .split('|')
-      .map(normalizeFirmCode),
+      .map(foldFirmCodeForExclusion),
   )
 
   async function stagePreview(records: IrsaliyeRecord[]): Promise<string> {
@@ -138,7 +138,10 @@ describe.skipIf(!SOCKET || !FILE)('irsaliye içe aktarma boru hattı (yerel Post
     const expectedOpen = parsed.records
       .filter(
         (r) =>
-          !r.is3112 && r.saleTypeAuto !== 'OTHER' && r.amountEurCents !== null && !EXCLUDED.has(r.firmCodeNorm),
+          !r.is3112 &&
+          r.saleTypeAuto !== 'OTHER' &&
+          r.amountEurCents !== null &&
+          !EXCLUDED.has(foldFirmCodeForExclusion(r.firmCodeNorm)),
       )
       .reduce((s, r) => s + (r.amountEurCents ?? 0), 0)
     const { rows: open } = await pool.query('select coalesce(sum(open_debt_eur_cents),0)::bigint as s from firm_side_balances')
@@ -158,9 +161,22 @@ describe.skipIf(!SOCKET || !FILE)('irsaliye içe aktarma boru hattı (yerel Post
       where f.code_norm = '10 K01' and t.remaining_eur_cents is not null`)
     expect(excl[0].n).toBe(0)
 
-    // Türkçe katlama: '54 Ç03' kodu '54 C03' olarak tek firma
-    const { rows: cagpas } = await pool.query(`select count(*)::int as n from firms where code_norm = '54 C03'`)
+    // Firma kimliği Türkçe harfi KORUR: '54 Ç03' kendi koduyla saklanır
+    const { rows: cagpas } = await pool.query(`select count(*)::int as n from firms where code_norm = '54 Ç03'`)
     expect(cagpas[0].n).toBe(1)
+
+    // '54 Ç03' hariç listesindeki ASCII '54 C03' ile katlanarak eşleşir → kapsam dışı
+    const { rows: cagpasScope } = await pool.query(`
+      select count(*)::int as n from installments t
+      join firms f on f.id = t.firm_id
+      where f.code_norm = '54 Ç03' and t.remaining_eur_cents is not null`)
+    expect(cagpasScope[0].n).toBe(0)
+
+    // '34 O02' (ORMAK) ve '34 Ö02' (ÖZ KARADENİZ) AYRI firmalar olarak var
+    const { rows: distinctFirms } = await pool.query(
+      `select count(*)::int as n from firms where code_norm in ('34 O02', '34 Ö02')`,
+    )
+    expect(distinctFirms[0].n).toBe(2)
   }, 120000)
 
   it('aynı dosya yeniden yüklenince: hepsi değişmedi, taksitler yeniden üretilmedi', async () => {

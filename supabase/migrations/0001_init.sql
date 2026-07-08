@@ -6,6 +6,15 @@
 
 create extension if not exists pgcrypto;
 
+-- Türkçe harf katlama (yalnız HARİÇ LİSTESİ eşleşmesinde kullanılır).
+-- Firma kimliği (code_norm) Türkçe harfleri KORUR: '34 O02' ve '34 Ö02'
+-- farklı firmalardır. Hariç listesi ise ASCII yazıldığı için ('54 C03')
+-- eşleşme iki taraf da katlanarak yapılır.
+create or replace function public.fold_tr(t text)
+returns text language sql immutable strict as $$
+  select upper(translate(t, 'İıŞşÇçĞğÜüÖöi', 'IISSCCGGUUOOI'))
+$$;
+
 -- ----------------------------------------------------------------------------
 -- 1) PROFİLLER ve ROL YARDIMCILARI
 -- ----------------------------------------------------------------------------
@@ -39,7 +48,7 @@ $$;
 -- ----------------------------------------------------------------------------
 create table if not exists public.firms (
   id uuid primary key default gen_random_uuid(),
-  code_norm text not null unique,          -- Türkçe katlanmış: '54 Ç03' → '54 C03'
+  code_norm text not null unique,          -- boşlukları normalize edilmiş kod (Türkçe harfler korunur)
   code_raw text not null,
   name text not null default '',
   segment text,
@@ -312,7 +321,7 @@ create or replace view public.v_invoices_effective with (security_invoker = true
     i.cancelled_by,
     i.cancel_reason,
     i.excluded_override,
-    (exists (select 1 from public.excluded_firm_codes e where e.code_norm = f.code_norm)) as is_excluded_firm,
+    (exists (select 1 from public.excluded_firm_codes e where public.fold_tr(e.code_norm) = public.fold_tr(f.code_norm))) as is_excluded_firm,
     case
       when coalesce(i.sale_type_override, i.sale_type_auto) = 'PESIN' then 'PESIN'
       when coalesce(i.sale_type_override, i.sale_type_auto) in ('KONSINYE', 'KONSINYE_PESIN') then 'VADELI'
@@ -324,7 +333,7 @@ create or replace view public.v_invoices_effective with (security_invoker = true
       and coalesce(i.sale_type_override, i.sale_type_auto) <> 'OTHER'
       and coalesce(
         not i.excluded_override,
-        not exists (select 1 from public.excluded_firm_codes e where e.code_norm = f.code_norm)
+        not exists (select 1 from public.excluded_firm_codes e where public.fold_tr(e.code_norm) = public.fold_tr(f.code_norm))
       )
     ) as is_allocatable
   from public.invoices i

@@ -39,9 +39,15 @@ describe.skipIf(!file)('parseIrsaliyeXls — gerçek dosya', () => {
     expect(first.firmCodeNorm).toBe('06 K08')
     expect(first.amountEurCents).toBe(5141486)
 
-    // Türkçe karakterli firma kodu: '54 Ç03' → '54 C03'
+    // Firma kodu kimliği Türkçe harfi korur ('54 Ç03' olduğu gibi kalır);
+    // hariç liste eşleşmesi ayrı bir katlamayla yapılır.
     const cagpas = parsed.records.find((r) => r.firmCodeRaw === '54 Ç03')
-    if (cagpas) expect(cagpas.firmCodeNorm).toBe('54 C03')
+    if (cagpas) expect(cagpas.firmCodeNorm).toBe('54 Ç03')
+
+    // ORMAK ve ÖZ KARADENİZ ayrı firmalar
+    const codes = new Set(parsed.records.map((r) => r.firmCodeNorm))
+    expect(codes.has('34 O02')).toBe(true)
+    expect(codes.has('34 Ö02')).toBe(true)
 
     // Kuyruk bloğu: serbest metin fiş no, 31/12
     const koluk = parsed.records.find((r) => r.fisNo === 'KÖLÜK İST.3')

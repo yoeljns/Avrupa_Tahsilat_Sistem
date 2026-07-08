@@ -32,9 +32,21 @@ export function normText(s: string | null | undefined): string {
 }
 
 /**
- * Firma kodu normalizasyonu: '54 Ç03' ↔ '54 C03' aynı koda iner.
- * Hariç tutulan firma listesi eşleşmesi ve tüm firma birleştirmeleri bu form üzerinden yapılır.
+ * Firma kodu KİMLİĞİ: yalnız kenar/iç boşluk normalizasyonu yapılır,
+ * Türkçe harfler KORUNUR. Çünkü '34 O02' (ORMAK) ve '34 Ö02' (ÖZ KARADENİZ)
+ * gerçekte FARKLI firmalardır — katlama onları yanlışlıkla birleştirir.
  */
 export function normalizeFirmCode(raw: string | null | undefined): string {
+  if (!raw) return ''
+  return String(raw).trim().replace(/\s+/g, ' ')
+}
+
+/**
+ * Hariç tutulan firma LİSTESİ eşleşmesi için katlanmış biçim.
+ * Kullanıcı listeyi ASCII yazar ('54 C03'), veri Türkçe harf taşır ('54 Ç03');
+ * eşleşme iki tarafı da katlayarak yapılır. Katlanan kod birden çok firmaya
+ * denk gelirse hepsi hariç tutulur (muhafazakâr davranış).
+ */
+export function foldFirmCodeForExclusion(raw: string | null | undefined): string {
   return normText(raw)
 }

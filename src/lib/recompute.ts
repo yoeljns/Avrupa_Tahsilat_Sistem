@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { foldFirmCodeForExclusion } from '@/lib/engine/normalize'
 import { reconcile } from '@/lib/engine/reconcile'
 import type { EngineInstallment, EnginePayment, Side } from '@/lib/engine/types'
 import { chunkedWrite, fetchAll } from '@/lib/db'
@@ -76,8 +77,9 @@ export async function runRecompute(
     const excludedCodes = await fetchAll<{ code_norm: string }>((from, to) =>
       admin.from('excluded_firm_codes').select('code_norm').order('code_norm').range(from, to),
     )
-    const codes = new Set(excludedCodes.map((c) => c.code_norm))
-    for (const f of firms) if (codes.has(f.code_norm)) excludedFirmIds.add(f.id)
+    // Hariç eşleşmesi Türkçe katlamayla yapılır ('54 C03' listedeyken '54 Ç03' verisi eşleşir)
+    const codes = new Set(excludedCodes.map((c) => foldFirmCodeForExclusion(c.code_norm)))
+    for (const f of firms) if (codes.has(foldFirmCodeForExclusion(f.code_norm))) excludedFirmIds.add(f.id)
   }
 
   // 2) Taksitler
