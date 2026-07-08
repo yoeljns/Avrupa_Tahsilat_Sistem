@@ -25,6 +25,7 @@ interface ExistingInvoiceFull {
   amount_eur_cents_override: number | null
   cancelled_at: string | null
   excluded_override: boolean | null
+  plan_override_note: string | null
   raw_changed_after_override: boolean
   needs_review: boolean
 }
@@ -118,7 +119,7 @@ export async function commitIrsaliyeBatch(
       admin
         .from('invoices')
         .select(
-          'id, fis_no, invoice_date, belge_no_raw, turu_raw, odeme_plani_raw, f_flag_raw, amount_tl, amount_eur_cents, sale_type_auto, sale_type_override, amount_eur_cents_override, cancelled_at, excluded_override, raw_changed_after_override, needs_review',
+          'id, fis_no, invoice_date, belge_no_raw, turu_raw, odeme_plani_raw, f_flag_raw, amount_tl, amount_eur_cents, sale_type_auto, sale_type_override, amount_eur_cents_override, cancelled_at, excluded_override, plan_override_note, raw_changed_after_override, needs_review',
         )
         .in('fis_no', chunk)
         .order('id')
@@ -146,7 +147,8 @@ export async function commitIrsaliyeBatch(
       (ex.sale_type_override !== null ||
         ex.amount_eur_cents_override !== null ||
         ex.cancelled_at !== null ||
-        ex.excluded_override !== null)
+        ex.excluded_override !== null ||
+        ex.plan_override_note !== null)
 
     const changedFields: string[] = []
     if (ex) {
@@ -276,14 +278,16 @@ export async function commitIrsaliyeBatch(
 
     if (side === null || effAmount === null) continue // OTHER veya tutarı okunamayan: taksit üretilmez
 
+    // Yönetici plan girdiyse (plan_override_note) dosyadaki plan değişse bile
+    // taksitler DOSYADAN yeniden üretilmez — çakışma bayrağı yeterli.
+    const hasPlanOverride = !!ex && ex.plan_override_note !== null
     const planChanged = !!ex && (ex.odeme_plani_raw ?? '') !== rec.odemePlaniRaw
     const amountChanged =
       !!ex && after.amount_eur_cents_override === null && (ex.amount_eur_cents ?? null) !== (rec.amountEurCents ?? null)
     const needsBuild = existingInsts.length === 0
-    const needsRegen = (planChanged || amountChanged) && !hasManual
+    const needsRegen = (planChanged || amountChanged) && !hasManual && !hasPlanOverride
 
     if (!needsBuild && !needsRegen) continue
-    if ((planChanged || amountChanged) && hasManual) continue // manuel taksitler korunur; conflict bayrağı zaten kalktı
 
     if (!needsBuild) regenInvoiceIds.push(after.id)
 
