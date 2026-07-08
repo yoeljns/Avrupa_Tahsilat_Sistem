@@ -422,7 +422,20 @@ create policy app_settings_select on public.app_settings for select
   using (auth.role() = 'authenticated');
 
 -- ----------------------------------------------------------------------------
--- 12) SEED — hariç tutulan 42 firma kodu (normalize edilmiş biçim) ve ayarlar.
+-- 12) SUNUCU YARDIMCI FONKSİYONLARI (yalnız service role çağırır)
+-- ----------------------------------------------------------------------------
+-- Mutabakat sonrası taksit kalanlarını tek çağrıda topluca günceller.
+create or replace function public.bulk_set_installment_remaining(updates jsonb)
+returns void language sql security definer set search_path = public as $$
+  update public.installments t
+  set remaining_eur_cents = nullif(u ->> 'remaining', '')::bigint
+  from jsonb_array_elements(updates) as u
+  where t.id = (u ->> 'id')::uuid
+$$;
+revoke execute on function public.bulk_set_installment_remaining(jsonb) from public, anon, authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 13) SEED — hariç tutulan 42 firma kodu (normalize edilmiş biçim) ve ayarlar.
 --     Not: '34 S01' ve '54 C03' kodları veride '34 Ş01' / '54 Ç03' olarak
 --     geçer; uygulama tüm kodları Türkçe katlamayla karşılaştırır.
 -- ----------------------------------------------------------------------------
