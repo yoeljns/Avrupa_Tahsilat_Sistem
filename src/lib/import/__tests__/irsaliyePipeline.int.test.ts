@@ -199,6 +199,26 @@ describe.skipIf(!SOCKET || !FILE)('irsaliye içe aktarma boru hattı (yerel Post
     expect(stats.firmsCreated).toBe(0)
   }, 120000)
 
+  it('sınıflandırma onayı yeniden içe aktarmada korunur (inceleme bayrağı geri yanmaz)', async () => {
+    // OTHER (sınıflandırma bekleyen) bir irsaliye seç, Tahsilat Yöneticisi onayını simüle et
+    const other = parsed.records.find((r) => r.saleTypeAuto === 'OTHER' && !r.is3112 && r.amountEurCents !== null)!
+    await pool.query(
+      `update invoices set sale_type_override = 'KONSINYE', needs_review = false where fis_no = $1`,
+      [other.fisNo],
+    )
+
+    const batchId = await stagePreview(parsed.records)
+    await commitIrsaliyeBatch(admin(), batchId, 'test@test')
+
+    const { rows: after } = await pool.query(
+      `select sale_type_override, needs_review, raw_changed_after_override from invoices where fis_no = $1`,
+      [other.fisNo],
+    )
+    expect(after[0].sale_type_override).toBe('KONSINYE')
+    expect(after[0].needs_review).toBe(false) // aynı dosya → bayrak geri yanmadı
+    expect(after[0].raw_changed_after_override).toBe(false)
+  }, 120000)
+
   it('override yeniden içe aktarmada korunur; manuel taksitlere dokunulmaz', async () => {
     // Tahsilat Yöneticisi düzenlemesi simülasyonu
     await pool.query(`

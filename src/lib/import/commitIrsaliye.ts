@@ -188,7 +188,10 @@ export async function commitIrsaliyeBatch(
       classify_reason: rec.classifyReason,
       is_31_12: rec.is3112,
       fisno_nonstandard: rec.fisnoNonstandard,
-      needs_review: rec.needsReview || rawChangedAfterOverride,
+      // Ham veri değişmediyse mevcut inceleme durumu korunur — kullanıcının
+      // kapattığı inceleme, aynı dosya yeniden yüklendi diye geri açılmaz.
+      needs_review:
+        ex && changedFields.length === 0 ? ex.needs_review || rawChangedAfterOverride : rec.needsReview || rawChangedAfterOverride,
       raw_changed_after_override: rawChangedAfterOverride,
       last_import_batch_id: batchId,
       updated_at: now,
