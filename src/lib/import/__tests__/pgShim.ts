@@ -19,7 +19,7 @@ class QueryBuilder implements PromiseLike<Result> {
   private insertRows: Row[] = []
   private updateValues: Row = {}
   private conflictTarget: string | null = null
-  private filters: Array<{ kind: 'eq' | 'neq' | 'in'; col: string; value: unknown }> = []
+  private filters: Array<{ kind: 'eq' | 'neq' | 'in' | 'gte'; col: string; value: unknown }> = []
   private orderBy: Array<{ col: string; ascending: boolean }> = []
   private rangeFrom: number | null = null
   private rangeTo: number | null = null
@@ -31,7 +31,9 @@ class QueryBuilder implements PromiseLike<Result> {
     this.table = table
   }
 
-  select(cols?: string) {
+  private countOnly = false
+
+  select(cols?: string, opts?: { count?: string; head?: boolean }) {
     if (this.mode === 'insert' || this.mode === 'upsert' || this.mode === 'update') {
       this.returning = true
       this.columns = cols ?? '*'
@@ -39,6 +41,7 @@ class QueryBuilder implements PromiseLike<Result> {
     }
     this.mode = 'select'
     this.columns = cols ?? '*'
+    if (opts?.count) this.countOnly = true
     return this
   }
   insert(rows: Row | Row[]) {
@@ -67,6 +70,10 @@ class QueryBuilder implements PromiseLike<Result> {
   }
   neq(col: string, value: unknown) {
     this.filters.push({ kind: 'neq', col, value })
+    return this
+  }
+  gte(col: string, value: unknown) {
+    this.filters.push({ kind: 'gte', col, value })
     return this
   }
   in(col: string, value: unknown[]) {
@@ -98,6 +105,10 @@ class QueryBuilder implements PromiseLike<Result> {
         params.push(f.value)
         return `"${f.col}" = ANY($${params.length})`
       }
+      if (f.kind === 'gte') {
+        params.push(f.value)
+        return `"${f.col}" >= $${params.length}`
+      }
       if (f.value === null) return `"${f.col}" IS ${f.kind === 'eq' ? '' : 'NOT '}NULL`
       params.push(f.value)
       return `"${f.col}" ${f.kind === 'eq' ? '=' : '<>'} $${params.length}`
@@ -124,6 +135,10 @@ class QueryBuilder implements PromiseLike<Result> {
       const params: unknown[] = []
       let sql = ''
 
+      if (this.mode === 'select' && this.countOnly) {
+        const res = await this.pool.query(`SELECT count(*)::int AS n FROM public."${this.table}"` + this.buildWhere(params), params)
+        return { data: [], error: null, count: res.rows[0]?.n ?? 0 } as Result & { count: number }
+      }
       if (this.mode === 'select') {
         sql = `SELECT ${this.colList()} FROM public."${this.table}"` + this.buildWhere(params)
         if (this.orderBy.length > 0) {

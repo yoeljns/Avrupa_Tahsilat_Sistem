@@ -11,6 +11,9 @@ export default async function YonetimPage() {
     { href: '/yonetim/haric-firmalar', title: 'Takip Dışı Firmalar', desc: 'Ödemeleri sisteme dahil edilmeyen firma kodları listesi' },
     { href: '/yonetim/bayiler', title: 'Bayi Listesi', desc: 'Firma–pazarlamacı eşlemesini Excel ile güncelleme' },
     { href: '/yonetim/denetim', title: 'Denetim Kaydı', desc: 'Kim, ne zaman, neyi değiştirdi — tüm değişiklik geçmişi' },
+    ...(session.email.toLowerCase() === 'yy@avrupagroup.com'
+      ? [{ href: '/yonetim/sifirlama', title: '⚠️ Veri Sıfırlama', desc: 'Tüm ödeme ve irsaliye verisini kalıcı olarak siler (yalnız siz)' }]
+      : []),
   ]
 
   return (

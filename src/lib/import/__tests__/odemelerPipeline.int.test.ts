@@ -3,6 +3,7 @@ import path from 'node:path'
 import { Pool, types } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chunkedWrite } from '@/lib/db'
+import { resetAllData } from '@/lib/resetData'
 import { commitIrsaliyeBatch } from '../commitIrsaliye'
 import { commitOdemelerBatch } from '../commitOdemeler'
 import { diffIrsaliye } from '../diff'
@@ -284,5 +285,41 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
       [r1, r2],
     )
     expect(diffRows[0].n).toBe(0)
+  }, 180000)
+
+  it('veri sıfırlama: irsaliye/ödeme/mutabakat silinir, firmalar ve denetim korunur', async () => {
+    const before = {
+      firms: (await pool.query('select count(*)::int as n from firms')).rows[0].n as number,
+      excluded: (await pool.query('select count(*)::int as n from excluded_firm_codes')).rows[0].n as number,
+    }
+    expect(before.firms).toBeGreaterThan(100)
+
+    const summary = await resetAllData(admin(), 'yy@avrupagroup.com')
+    expect(summary.invoices).toBe(2064)
+    expect(summary.payments).toBe(1601)
+    expect(summary.runs).toBeGreaterThan(0)
+
+    for (const t of ['invoices', 'installments', 'payments', 'recon_runs', 'allocations', 'firm_balances', 'import_batches', 'import_rows']) {
+      const { rows } = await pool.query(`select count(*)::int as n from ${t}`)
+      expect(rows[0].n, t).toBe(0)
+    }
+    // Korunanlar
+    const after = {
+      firms: (await pool.query('select count(*)::int as n from firms')).rows[0].n as number,
+      excluded: (await pool.query('select count(*)::int as n from excluded_firm_codes')).rows[0].n as number,
+    }
+    expect(after.firms).toBe(before.firms)
+    expect(after.excluded).toBe(before.excluded)
+
+    // İşaretçi temizlendi, sıfırlama denetime işlendi
+    const { rows: ptr } = await pool.query(`select value->>'run_id' as run_id from app_settings where key='current_recon_run'`)
+    expect(ptr[0].run_id).toBeNull()
+    const { rows: audit } = await pool.query(`select count(*)::int as n from audit_log where action='VERI_SIFIRLAMA'`)
+    expect(audit[0].n).toBe(1)
+
+    // Sıfırlama sonrası yeniden içe aktarma temiz başlar (hepsi 'new')
+    const parsedIrs = parseIrsaliyeXls(readFileSync(IRS!))
+    const { rows: diffAfterReset } = await diffIrsaliye(admin(), parsedIrs.records)
+    expect(diffAfterReset.some((r) => r.status === 'unchanged' || r.status === 'updated')).toBe(false)
   }, 180000)
 })
