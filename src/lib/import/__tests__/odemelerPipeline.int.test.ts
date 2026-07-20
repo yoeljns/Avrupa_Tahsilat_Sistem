@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chunkedWrite } from '@/lib/db'
 import { resetAllData } from '@/lib/resetData'
 import { commitIrsaliyeBatch } from '../commitIrsaliye'
-import { commitOdemelerBatch } from '../commitOdemeler'
+import { commitOdemelerBatch, resolveFirmsByName } from '../commitOdemeler'
 import { diffIrsaliye } from '../diff'
 import { parseIrsaliyeXls } from '../irsaliyeParser'
 import { parseOdemelerXlsx } from '../odemelerParser'
@@ -17,6 +17,7 @@ import { createPgShim } from './pgShim'
 const SOCKET = process.env.PG_TEST_SOCKET
 const IRS = process.env.IRSALIYE_FILE
 const ODM = process.env.ODEMELER_FILE
+const ODM_SLIM = process.env.ODEMELER_SLIM_FILE // ince biçim (FİRMA KODU'suz) yedek
 
 const AUTH_STUB = `
 create schema if not exists auth;
@@ -80,10 +81,11 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     await pool?.end()
   })
 
-  async function stageOdemeler(): Promise<string> {
-    const parsed = parseOdemelerXlsx(readFileSync(ODM!))
+  async function stageOdemeler(file: string = ODM!): Promise<string> {
+    const parsed = parseOdemelerXlsx(readFileSync(file))
     expect(parsed.records.length).toBeGreaterThan(1500)
     const a = admin()
+    await resolveFirmsByName(a, parsed.records)
     const { data: batch } = await a
       .from('import_batches')
       .insert({ kind: 'odemeler', filename: 'pay.xlsx', uploaded_by: 't@t', status: 'preview' })
@@ -287,6 +289,61 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     expect(diffRows[0].n).toBe(0)
   }, 180000)
 
+  it.skipIf(!ODM_SLIM)('ince biçim yedek (FİRMA KODU yok): adla eşleşir, mevcut alanlar korunur', async () => {
+    // Yeni yedek biçimi yalnız 7 kolon içeriyor; firmalar addan çözülür.
+    const parsed = parseOdemelerXlsx(readFileSync(ODM_SLIM!))
+    expect(parsed.records.length).toBe(1681)
+    expect(parsed.records.every((r) => !r.hasKodu && !r.hasDetails)).toBe(true)
+    expect(parsed.invalids).toHaveLength(0)
+
+    const a = admin()
+    const { unresolved } = await resolveFirmsByName(a, parsed.records)
+    expect(unresolved).toHaveLength(0) // 84 yeni kaydın tamamı adla çözülür
+
+    const { data: batch } = await a
+      .from('import_batches')
+      .insert({ kind: 'odemeler', filename: 'slim.xlsx', uploaded_by: 't@t', status: 'preview' })
+      .select('id')
+      .single()
+    const batchId = (batch as { id: string }).id
+    await chunkedWrite(parsed.records, (chunk) =>
+      a.from('import_rows').insert(
+        chunk.map((r) => ({
+          batch_id: batchId,
+          row_index: r.rowIndex,
+          natural_key: r.islemKodu,
+          payload: r,
+          diff_status: 'new',
+          changed_fields: [],
+        })),
+      ),
+    )
+    const stats = await commitOdemelerBatch(a, batchId, 't@t')
+    expect(stats.inserted).toBe(84) // yeni ödemeler
+    expect(stats.firmsCreated).toBe(0) // hepsi mevcut firmalara bağlandı
+
+    const { rows: total } = await pool.query('select count(*)::int as n from payments')
+    expect(total[0].n).toBe(1685) // 1601 + 84
+
+    // KRİTİK: ince biçimde OLMAYAN kolonlar mevcut kayıtlarda EZİLMEDİ
+    const { rows: kdv } = await pool.query('select count(*)::int as n from payments where is_kdv')
+    expect(kdv[0].n).toBe(36)
+    const { rows: htk } = await pool.query(
+      `select aciklama, kdv_fatura_referansi, is_kdv from payments where islem_kodu = 'ISL-20260116-6E27'`,
+    )
+    expect(htk[0].is_kdv).toBe(true)
+    expect(htk[0].kdv_fatura_referansi).toBe('0042')
+    expect(htk[0].aciklama).toBe('0042-5TE1')
+
+    // Yeni kayıtların hepsi bir firmaya bağlı ve mutabakata girdi
+    const { rows: orphan } = await pool.query('select count(*)::int as n from payments where firm_id is null')
+    expect(orphan[0].n).toBe(0)
+    const { rows: run } = await pool.query(`
+      with cur as (select (value->>'run_id')::uuid as run_id from app_settings where key='current_recon_run')
+      select count(*)::int as n from allocations where run_id = (select run_id from cur)`)
+    expect(run[0].n).toBeGreaterThan(0)
+  }, 180000)
+
   it('veri sıfırlama: irsaliye/ödeme/mutabakat silinir, firmalar ve denetim korunur', async () => {
     const before = {
       firms: (await pool.query('select count(*)::int as n from firms')).rows[0].n as number,
@@ -296,7 +353,7 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
 
     const summary = await resetAllData(admin(), 'yy@avrupagroup.com')
     expect(summary.invoices).toBe(2064)
-    expect(summary.payments).toBe(1601)
+    expect(summary.payments).toBeGreaterThanOrEqual(1601) // ince biçim testi koştuysa 1685
     expect(summary.runs).toBeGreaterThan(0)
 
     for (const t of ['invoices', 'installments', 'payments', 'recon_runs', 'allocations', 'firm_balances', 'import_batches', 'import_rows']) {

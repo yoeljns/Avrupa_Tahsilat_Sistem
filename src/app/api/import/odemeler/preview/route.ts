@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { apiSession } from '@/lib/auth'
 import { chunkedWrite } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
-import { fetchExistingPayments, odemeChangedFields } from '@/lib/import/commitOdemeler'
+import { fetchExistingPayments, odemeChangedFields, resolveFirmsByName } from '@/lib/import/commitOdemeler'
 import { parseOdemelerXlsx } from '@/lib/import/odemelerParser'
 
 export const runtime = 'nodejs'
@@ -37,6 +37,24 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminSupabase()
+
+  // İnce biçim (FİRMA KODU'suz) yedeklerde firmalar addan çözülür;
+  // çözülemeyenler geçersiz satır olarak listelenir, diğerleri normal akışta ilerler.
+  const slimCount = parsed.records.filter((r) => !r.hasKodu).length
+  const { resolvedByName, unresolved } = await resolveFirmsByName(admin, parsed.records)
+  if (unresolved.length > 0) {
+    const unresolvedSet = new Set(unresolved.map((u) => u.islemKodu))
+    for (const u of unresolved) {
+      parsed.invalids.push({
+        rowIndex: 0,
+        sheet: '-',
+        error: `Firma adı eşleşmedi: "${u.firmaRaw}" (${u.reason})`,
+        preview: u.islemKodu,
+      })
+    }
+    parsed.records = parsed.records.filter((r) => !unresolvedSet.has(r.islemKodu))
+  }
+
   const existing = await fetchExistingPayments(
     admin,
     parsed.records.map((r) => r.islemKodu),
@@ -101,6 +119,11 @@ export async function POST(request: Request) {
     total: parsed.records.length + parsed.invalids.length,
     warnings: [
       ...parsed.warnings,
+      ...(slimCount > 0
+        ? [
+            `Dosyada FİRMA KODU kolonu yok (ince biçim yedek): firmalar ad üzerinden eşleştirildi (${resolvedByName} yeni kayıt adla çözüldü${unresolved.length > 0 ? `, ${unresolved.length} tanesi eşleşmedi` : ''}). Mevcut kayıtların AÇIKLAMA/KDV/DURUM alanları korunacak.`,
+          ]
+        : []),
       ...(alcCount > 0 ? [`${alcCount} ALC (alacak) kaydı bilgi olarak saklanacak, tahsise girmeyecek.`] : []),
       ...(incompleteCount > 0 ? [`${incompleteCount} kayıt TAMAMLANMAMIŞ durumda — tahsise girmeyecek.`] : []),
       ...(kdvCount > 0

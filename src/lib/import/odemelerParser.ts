@@ -7,6 +7,13 @@ import { normText, normalizeFirmCode } from '@/lib/engine/normalize'
 // Yalnız PEŞİN ve VADELİ sayfaları okunur (LOG_*, ODEME_* vb. atlanır).
 // Sütunlar pozisyonla değil, BAŞLIK ADLARIYLA (Türkçe katlanmış) eşlenir —
 // sütun sırası değişse de içe aktarma bozulmaz.
+//
+// İKİ BİÇİM DESTEKLENİR:
+//  * Tam biçim: FİRMA KODU + AÇIKLAMA/ALACAKLI/KDV/DURUM kolonlarıyla.
+//  * İnce biçim (10.07 sonrası yedekler): yalnız İŞLEM KODU, İŞLEM TARİHİ,
+//    FİRMA, GELEN TL, DÖVİZ EURO, KUR, TOPLAM TL. Firma eşleşmesi FİRMA
+//    adından yapılır (önizleme aşamasında çözülür); dosyada OLMAYAN kolonlar
+//    mevcut kayıtlar üzerinde ASLA ezilmez.
 
 export interface OdemeRecord {
   rowIndex: number
@@ -43,8 +50,12 @@ export interface OdemeRecord {
   hedefAcikEurRaw: string
   isAlc: boolean
   isComplete: boolean
-  /** KDV 1/5 ön ödemesi — mal borcu tahsisine girmez */
+  /** KDV 1/5 ön ödemesi — referansındaki irsaliyeden düşülür */
   isKdv: boolean
+  /** Dosyada FİRMA KODU kolonu var mıydı? Yoksa firma, addan çözülür. */
+  hasKodu: boolean
+  /** Dosyada detay kolonları (AÇIKLAMA/ALACAKLI/KDV/DURUM) var mıydı? Yoksa mevcut değerler korunur. */
+  hasDetails: boolean
 }
 
 export interface OdemeInvalidRow {
@@ -109,7 +120,7 @@ function headerMap(headerRow: Cell[]): Map<string, number> {
   return map
 }
 
-const REQUIRED_HEADERS = ['ISLEM KODU', 'FIRMA KODU', 'DOVIZ EURO']
+const REQUIRED_HEADERS = ['ISLEM KODU', 'DOVIZ EURO']
 
 export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
   const wb = XLSX.read(buf, { type: buf instanceof ArrayBuffer ? 'array' : 'buffer', raw: true })
@@ -137,6 +148,12 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
       warnings.push(`'${sheetName}' sayfasında beklenen başlıklar eksik: ${missing.join(', ')} — sayfa atlandı.`)
       continue
     }
+    const hasKodu = h.has('FIRMA KODU')
+    const hasDetails = h.has('ACIKLAMA') || h.has('KAYIT DURUMU') || h.has('KDV 1/5 DURUMU')
+    if (!hasKodu && !h.has('FIRMA')) {
+      warnings.push(`'${sheetName}' sayfasında ne FİRMA KODU ne FİRMA başlığı var — sayfa atlandı.`)
+      continue
+    }
 
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r] ?? []
@@ -155,8 +172,13 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
       seenKodu.add(islemKodu)
 
       const firmCodeRaw = cellStr(get('FIRMA KODU'))
-      if (!firmCodeRaw) {
+      const firmaRaw = cellStr(get('FIRMA'))
+      if (hasKodu && !firmCodeRaw) {
         invalids.push({ rowIndex: r + 1, sheet: sheetName, error: 'Firma kodu boş', preview: islemKodu })
+        continue
+      }
+      if (!hasKodu && !firmaRaw) {
+        invalids.push({ rowIndex: r + 1, sheet: sheetName, error: 'Firma adı boş', preview: islemKodu })
         continue
       }
 
@@ -170,7 +192,7 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
         sheetSide: side,
         islemKodu,
         islemTarihiISO: cellTimestamp(get('ISLEM TARIHI')),
-        firmaRaw: cellStr(get('FIRMA')),
+        firmaRaw,
         firmCodeRaw,
         firmCodeNorm: normalizeFirmCode(firmCodeRaw),
         gelenTl: cellNum(get('GELEN TL')),
@@ -200,6 +222,8 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
         isAlc: islemKodu.startsWith('ALC'),
         isComplete: kayitNorm === '' || kayitNorm === 'TAMAMLANDI',
         isKdv: normText(kdv15Durumu) === 'EVET',
+        hasKodu,
+        hasDetails,
       })
     }
   }
