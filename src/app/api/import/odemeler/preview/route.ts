@@ -46,8 +46,8 @@ export async function POST(request: Request) {
     const unresolvedSet = new Set(unresolved.map((u) => u.islemKodu))
     for (const u of unresolved) {
       parsed.invalids.push({
-        rowIndex: 0,
-        sheet: '-',
+        rowIndex: u.rowIndex,
+        sheet: u.sheet,
         error: `Firma adı eşleşmedi: "${u.firmaRaw}" (${u.reason})`,
         preview: u.islemKodu,
       })

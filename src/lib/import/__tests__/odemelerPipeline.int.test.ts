@@ -290,15 +290,17 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
   }, 180000)
 
   it.skipIf(!ODM_SLIM)('ince biçim yedek (FİRMA KODU yok): adla eşleşir, mevcut alanlar korunur', async () => {
-    // Yeni yedek biçimi yalnız 7 kolon içeriyor; firmalar addan çözülür.
+    // Yeni yedek biçimi yalnız 7 kolon içeriyor; firma kodu ya adın sonundaki
+    // parantezden çıkarılır ('… (06 K07)') ya da addan çözülür.
     const parsed = parseOdemelerXlsx(readFileSync(ODM_SLIM!))
     expect(parsed.records.length).toBe(1681)
-    expect(parsed.records.every((r) => !r.hasKodu && !r.hasDetails)).toBe(true)
+    expect(parsed.records.every((r) => !r.hasDetails)).toBe(true)
     expect(parsed.invalids).toHaveLength(0)
 
     const a = admin()
     const { unresolved } = await resolveFirmsByName(a, parsed.records)
-    expect(unresolved).toHaveLength(0) // 84 yeni kaydın tamamı adla çözülür
+    expect(unresolved).toHaveLength(0)
+    expect(parsed.records.every((r) => r.firmCodeNorm.length > 0)).toBe(true) // tümü koda bağlandı
 
     const { data: batch } = await a
       .from('import_batches')
@@ -320,7 +322,6 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     )
     const stats = await commitOdemelerBatch(a, batchId, 't@t')
     expect(stats.inserted).toBe(84) // yeni ödemeler
-    expect(stats.firmsCreated).toBe(0) // hepsi mevcut firmalara bağlandı
 
     const { rows: total } = await pool.query('select count(*)::int as n from payments')
     expect(total[0].n).toBe(1685) // 1601 + 84
@@ -378,5 +379,18 @@ describe.skipIf(!SOCKET || !IRS || !ODM)('ödeme içe aktarma + FIFO mutabakat (
     const parsedIrs = parseIrsaliyeXls(readFileSync(IRS!))
     const { rows: diffAfterReset } = await diffIrsaliye(admin(), parsedIrs.records)
     expect(diffAfterReset.some((r) => r.status === 'unchanged' || r.status === 'updated')).toBe(false)
+
+    // KULLANICI SENARYOSU: sıfırlama sonrası (ödeme geçmişi yokken) ince biçim
+    // dosya yüklenir — parantezli kodlar sayesinde tüm kayıtlar firmaya bağlanır.
+    if (ODM_SLIM) {
+      const batchId2 = await stageOdemeler(ODM_SLIM)
+      const stats2 = await commitOdemelerBatch(admin(), batchId2, 't@t')
+      expect(stats2.inserted).toBe(1681)
+      const { rows: orphan2 } = await pool.query('select count(*)::int as n from payments where firm_id is null')
+      expect(orphan2[0].n).toBe(0)
+      // Otomatik oluşturulan firma adlarının sonunda parantezli kod eki kalmaz
+      const { rows: badName } = await pool.query(String.raw`select count(*)::int as n from firms where name ~ '\(\S+ \S+\)$'`)
+      expect(badName[0].n).toBe(0)
+    }
   }, 180000)
 })

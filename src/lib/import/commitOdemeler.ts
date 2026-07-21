@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { normText, normalizeFirmCode } from '@/lib/engine/normalize'
 import { chunkedWrite, fetchAll, writeAudit, type AuditEntry } from '@/lib/db'
 import { runRecompute } from '@/lib/recompute'
-import type { OdemeRecord } from './odemelerParser'
+import { stripCodeSuffix, type OdemeRecord } from './odemelerParser'
 
 // Staged ödeme batch'ini uygular. Ödemelerde override yoktur; tüm sütunlar
 // ham veridir ve islem_kodu ile idempotent upsert edilir.
@@ -60,6 +60,8 @@ export interface UnresolvedFirm {
   islemKodu: string
   firmaRaw: string
   reason: string
+  rowIndex: number
+  sheet: string
 }
 
 /**
@@ -112,6 +114,8 @@ export async function resolveFirmsByName(
           islemKodu: rec.islemKodu,
           firmaRaw: rec.firmaRaw,
           reason: candidates && candidates.size > 1 ? 'Ad birden çok firmayla eşleşti' : 'Ad hiçbir firmayla eşleşmedi',
+          rowIndex: rec.rowIndex,
+          sheet: rec.sheet,
         })
         continue
       }
@@ -184,7 +188,12 @@ export async function commitOdemelerBatch(
     await chunkedWrite(
       missingCodes.map((code) => {
         const rec = byCode.get(code)!
-        return { code_norm: code, code_raw: rec.firmCodeRaw, name: rec.firmaRaw || rec.firmCodeRaw, is_auto_created: true }
+        return {
+          code_norm: code,
+          code_raw: rec.firmCodeRaw,
+          name: stripCodeSuffix(rec.firmaRaw) || rec.firmCodeRaw,
+          is_auto_created: true,
+        }
       }),
       (chunk) => admin.from('firms').insert(chunk),
     )

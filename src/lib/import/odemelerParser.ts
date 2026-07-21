@@ -110,6 +110,26 @@ function cellTimestamp(v: Cell): string | null {
   return null
 }
 
+// Bazı yedeklerde firma kodu, FİRMA adının sonunda parantez içinde gelir:
+//   'KUZEY TOPTAN HIRDAVAT SAN TİC LTD.ŞTİ (06 K07)'
+const PAREN_CODE = /\(([^()]+)\)\s*$/
+const CODE_SHAPE = /^[0-9A-Za-zÇĞİÖŞÜçğıöşü]{1,4}\s+[0-9A-Za-zÇĞİÖŞÜçğıöşü]{1,4}$/
+
+/** Ad sonundaki parantezli firma kodunu döndürür ('06 K07') — yoksa null. */
+export function extractCodeFromName(firmaRaw: string): string | null {
+  const m = PAREN_CODE.exec(firmaRaw)
+  if (!m) return null
+  const candidate = m[1].trim().replace(/\s+/g, ' ')
+  return CODE_SHAPE.test(candidate) ? candidate : null
+}
+
+/** Parantezli kod ekini addan temizler (firma adı olarak kullanmak için). */
+export function stripCodeSuffix(firmaRaw: string): string {
+  const code = extractCodeFromName(firmaRaw)
+  if (!code) return firmaRaw
+  return firmaRaw.replace(PAREN_CODE, '').trim()
+}
+
 /** Başlık satırından katlanmış-ad → sütun indeksi haritası kurar. */
 function headerMap(headerRow: Cell[]): Map<string, number> {
   const map = new Map<string, number>()
@@ -171,13 +191,22 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
       }
       seenKodu.add(islemKodu)
 
-      const firmCodeRaw = cellStr(get('FIRMA KODU'))
+      let firmCodeRaw = cellStr(get('FIRMA KODU'))
       const firmaRaw = cellStr(get('FIRMA'))
+      let koduVar = hasKodu
+      if (!koduVar) {
+        // FİRMA KODU kolonu yoksa: önce ad sonundaki parantezli kodu dene
+        const extracted = extractCodeFromName(firmaRaw)
+        if (extracted) {
+          firmCodeRaw = extracted
+          koduVar = true
+        }
+      }
       if (hasKodu && !firmCodeRaw) {
         invalids.push({ rowIndex: r + 1, sheet: sheetName, error: 'Firma kodu boş', preview: islemKodu })
         continue
       }
-      if (!hasKodu && !firmaRaw) {
+      if (!koduVar && !firmaRaw) {
         invalids.push({ rowIndex: r + 1, sheet: sheetName, error: 'Firma adı boş', preview: islemKodu })
         continue
       }
@@ -222,7 +251,7 @@ export function parseOdemelerXlsx(buf: Buffer | ArrayBuffer): ParsedOdemeler {
         isAlc: islemKodu.startsWith('ALC'),
         isComplete: kayitNorm === '' || kayitNorm === 'TAMAMLANDI',
         isKdv: normText(kdv15Durumu) === 'EVET',
-        hasKodu,
+        hasKodu: koduVar,
         hasDetails,
       })
     }
