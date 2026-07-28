@@ -3,7 +3,7 @@ import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationN
 import MonthMatrix from '@/components/MonthMatrix'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { addMonths, eur, monthOf, todayISO, trMonth } from '@/lib/format'
-import { currentRunId, pazarlamaciByFirm, scopeInstallments } from '@/lib/queries'
+import { matrisVerisi, type ScopeInstallmentRow } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -15,11 +15,13 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
   const params = await searchParams
   const month = /^\d{4}-\d{2}$/.test(params.ay ?? '') ? params.ay! : monthOf(todayISO())
 
-  const runId = await currentRunId(supabase)
-  let rows: Awaited<ReturnType<typeof scopeInstallments>> = []
+  // TEK ağ turu: koşu + taksitler + sorumlu eşlemesi
+  let rows: ScopeInstallmentRow[] = []
   let sorumlu = new Map<string, string>()
   try {
-    if (runId) [rows, sorumlu] = await Promise.all([scopeInstallments(supabase, 'VADELI'), pazarlamaciByFirm(supabase)])
+    const veri = await matrisVerisi(supabase, 'VADELI')
+    rows = veri.rows
+    sorumlu = veri.sorumlu
   } catch (e) {
     if (isMissingRelationError(e)) return <MigrationNeeded />
     throw e

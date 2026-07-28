@@ -106,3 +106,33 @@ export async function pazarlamaciByFirm(supabase: SupabaseClient): Promise<Map<s
   }
   return map
 }
+
+/**
+ * Matris sayfalarının (konsinye / peşin) TÜM verisi TEK ağ turunda.
+ *
+ * Eskiden: currentRunId (1 tur) + scopeInstallments (1000'lik sayfalama ile
+ * N ARDIŞIK tur) + pazarlamaciByFirm → allFirms (M tur). Uygulama ile
+ * veritabanı arası her tur gecikme ekliyordu; sayfa geçişi saniyelere çıkıyordu.
+ * Artık rpc_matris_verisi hepsini tek yanıtta döndürür (RLS aynen işler).
+ * RPC yoksa eski çok turlu yola düşülür — migration sırası kimseyi kilitlemez.
+ */
+export async function matrisVerisi(
+  supabase: SupabaseClient,
+  side: 'PESIN' | 'VADELI',
+): Promise<{ runId: string | null; rows: ScopeInstallmentRow[]; sorumlu: Map<string, string> }> {
+  const { data, error } = await supabase.rpc('rpc_matris_verisi', { p_side: side })
+  if (!error && data) {
+    const d = data as { run_id: string | null; rows: ScopeInstallmentRow[]; sorumlu: Record<string, string> }
+    return {
+      runId: d.run_id ?? null,
+      rows: d.rows ?? [],
+      sorumlu: new Map(Object.entries(d.sorumlu ?? {})),
+    }
+  }
+
+  // geri düşüş (RPC kurulmadan önce): eski çok turlu yol
+  const runId = await currentRunId(supabase)
+  if (!runId) return { runId: null, rows: [], sorumlu: new Map() }
+  const [rows, sorumlu] = await Promise.all([scopeInstallments(supabase, side), pazarlamaciByFirm(supabase)])
+  return { runId, rows, sorumlu }
+}

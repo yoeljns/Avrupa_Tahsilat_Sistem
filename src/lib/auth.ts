@@ -1,3 +1,4 @@
+import { cache } from 'react'
 import { redirect } from 'next/navigation'
 import { createServerSupabase } from '@/lib/supabase/server'
 
@@ -15,9 +16,26 @@ export function isStaffRole(role: Role): boolean {
   return role === 'yonetici' || role === 'tahsilat_yoneticisi'
 }
 
-/** Oturum + aktif profil; yoksa null. */
-export async function getSessionProfile(): Promise<SessionProfile | null> {
+/**
+ * Oturum + aktif profil; yoksa null.
+ *
+ * HIZ (iki katman):
+ *  1. cache(): aynı istek içinde tek kez çalışır — layout (requireUser) ve
+ *     sayfanın kendisi ayrı ayrı çağırıyordu, maliyet ikiye katlanıyordu.
+ *  2. rpc_oturum_profilim(): TEK ağ turu. Eskiden auth.getUser() (Supabase
+ *     Auth SUNUCUSUNA ayrı tur) + profiles select (ikinci tur) yapılıyordu.
+ * RPC kurulu değilse (migration uygulanmadıysa) eski yola düşer.
+ */
+export const getSessionProfile = cache(async (): Promise<SessionProfile | null> => {
   const supabase = await createServerSupabase()
+
+  const { data: rpc, error } = await supabase.rpc('rpc_oturum_profilim')
+  if (!error) {
+    const p = rpc as SessionProfile | null
+    return p && p.userId ? p : null
+  }
+
+  // geri düşüş: klasik iki turlu yol
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -36,7 +54,7 @@ export async function getSessionProfile(): Promise<SessionProfile | null> {
     fullName: profile.full_name,
     role: profile.role as Role,
   }
-}
+})
 
 /** Sayfalar için: oturum yoksa /login'e yollar. */
 export async function requireUser(): Promise<SessionProfile> {

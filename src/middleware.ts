@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { supabaseAnonKey, supabaseUrl } from '@/lib/env'
+import { jetonTazeMi, oturumCerezleri } from '@/lib/jeton'
 
 // Oturum çerezlerini yeniler ve oturumsuz sayfa trafiğini /login'e yönlendirir.
 // /api rotaları kendi yetki kontrollerini yapar (JSON 401 dönebilmeleri için).
@@ -28,6 +29,34 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl)
   }
 
+  const path0 = request.nextUrl.pathname
+  const isPublic0 = PUBLIC_PATHS.some((p) => path0 === p || path0.startsWith(p + '/'))
+  const isApi0 = path0.startsWith('/api')
+  const cerezler = request.cookies.getAll().map((c) => ({ name: c.name, value: c.value }))
+
+  // 1) Oturum çerezi hiç yoksa: AĞA ÇIKMADAN karar ver
+  if (oturumCerezleri(cerezler).length === 0) {
+    if (isPublic0 || isApi0) return response
+    const redirectUrl = request.nextUrl.clone()
+    redirectUrl.pathname = '/login'
+    redirectUrl.search = ''
+    return NextResponse.redirect(redirectUrl)
+  }
+
+  // 2) Jeton hâlâ taze: Auth sunucusuna GİTME. Her sayfa geçişinden bir ağ
+  //    turu düşer. Yetki zaten sayfada (requireUser) ve veride (RLS)
+  //    doğrulanıyor; burada yapılan iş yalnız yönlendirme/tazeleme.
+  if (jetonTazeMi(cerezler, Date.now())) {
+    if (path0 === '/login') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/'
+      url.search = ''
+      return NextResponse.redirect(url)
+    }
+    return response
+  }
+
+  // 3) Jeton bitmiş/çözülemedi: normal doğrulama + oturum tazeleme yolu
   const supabase = createServerClient(url, anonKey, {
     cookies: {
       getAll() {
