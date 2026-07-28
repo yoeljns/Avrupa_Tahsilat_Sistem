@@ -1,7 +1,19 @@
 import { Fragment } from 'react'
 import Link from 'next/link'
 import { eur, trDate } from '@/lib/format'
-import type { ScopeInstallmentRow } from '@/lib/queries'
+
+// Matrisin GERÇEKTEN kullandığı alanlar. Dar tutulur ki sunucudan gereksiz
+// sütun taşınmasın (ScopeInstallmentRow bu yapıyı zaten karşılar).
+export interface MatrisSatiri {
+  firm_id: string
+  firm_code: string
+  firm_name: string
+  due_date: string
+  amount_eur_cents: number
+  remaining_eur_cents: number
+  paid_eur_cents: number
+  no_date_flag: boolean
+}
 
 // Takvim matrisi — kullanıcının referans Excel tablosuyla aynı düzen:
 // satır = firma; her vade günü için ÜÇ alt sütun: BORÇ | ÖDEME | KALAN.
@@ -9,7 +21,7 @@ import type { ScopeInstallmentRow } from '@/lib/queries'
 // Sonraki Aylar (ay sonrası kalan) ve firma TOPLAM borç/ödenen/kalan sütunları.
 
 interface MonthMatrixProps {
-  rows: ScopeInstallmentRow[]
+  rows: MatrisSatiri[]
   month: string // 'YYYY-MM'
   sorumluByFirm?: Map<string, string>
 }
@@ -33,7 +45,7 @@ interface FirmAgg {
   totalKalan: number
 }
 
-function addTo(agg: DateAgg, r: ScopeInstallmentRow) {
+function addTo(agg: DateAgg, r: MatrisSatiri) {
   agg.borc += r.amount_eur_cents
   agg.odeme += r.paid_eur_cents
   agg.kalan += r.remaining_eur_cents

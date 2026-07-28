@@ -3,7 +3,8 @@ import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationN
 import MonthMatrix from '@/components/MonthMatrix'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { addMonths, eur, monthOf, todayISO, trMonth } from '@/lib/format'
-import { matrisVerisi, type ScopeInstallmentRow } from '@/lib/queries'
+import { matrisVerisi } from '@/lib/queries'
+import type { MatrisSatiri } from '@/components/MonthMatrix'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +17,7 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
   const month = /^\d{4}-\d{2}$/.test(params.ay ?? '') ? params.ay! : monthOf(todayISO())
 
   // TEK ağ turu: koşu + taksitler + sorumlu eşlemesi
-  let rows: ScopeInstallmentRow[] = []
+  let rows: MatrisSatiri[] = []
   let sorumlu = new Map<string, string>()
   try {
     const veri = await matrisVerisi(supabase, 'VADELI')
@@ -63,11 +64,11 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
             </a>
           )}
           <nav className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white p-1 text-sm">
-            <Link href={`/konsinye?ay=${addMonths(month, -1)}`} className="rounded px-2 py-1 hover:bg-slate-100">
+            <Link href={`/konsinye?ay=${addMonths(month, -1)}`} prefetch className="rounded px-2 py-1 hover:bg-slate-100">
               ←
             </Link>
             <span className="px-2 font-medium">{trMonth(month)}</span>
-            <Link href={`/konsinye?ay=${addMonths(month, 1)}`} className="rounded px-2 py-1 hover:bg-slate-100">
+            <Link href={`/konsinye?ay=${addMonths(month, 1)}`} prefetch className="rounded px-2 py-1 hover:bg-slate-100">
               →
             </Link>
           </nav>

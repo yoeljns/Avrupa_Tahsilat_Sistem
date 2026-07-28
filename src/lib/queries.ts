@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/db'
+import type { MatrisSatiri } from '@/components/MonthMatrix'
 
 // Okuma sayfalarının ortak sorguları. Kullanıcı oturumlu istemciyle çağrılır —
 // RLS sayesinde pazarlamacı yalnız kendi firmalarının verisini görür.
@@ -119,10 +120,10 @@ export async function pazarlamaciByFirm(supabase: SupabaseClient): Promise<Map<s
 export async function matrisVerisi(
   supabase: SupabaseClient,
   side: 'PESIN' | 'VADELI',
-): Promise<{ runId: string | null; rows: ScopeInstallmentRow[]; sorumlu: Map<string, string> }> {
+): Promise<{ runId: string | null; rows: MatrisSatiri[]; sorumlu: Map<string, string> }> {
   const { data, error } = await supabase.rpc('rpc_matris_verisi', { p_side: side })
   if (!error && data) {
-    const d = data as { run_id: string | null; rows: ScopeInstallmentRow[]; sorumlu: Record<string, string> }
+    const d = data as { run_id: string | null; rows: MatrisSatiri[]; sorumlu: Record<string, string> }
     return {
       runId: d.run_id ?? null,
       rows: d.rows ?? [],

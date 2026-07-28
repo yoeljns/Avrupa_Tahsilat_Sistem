@@ -132,6 +132,11 @@ describe.skipIf(!SOCKET)('0004_hiz: tek turda profil + matris verisi', () => {
     expect(r.v.run_id).toBeTruthy()
     expect(r.v.rows).toHaveLength(2)
     expect(r.v.rows[0].due_date).toBe('2026-03-05')
+    // yalnız matrisin kullandığı alanlar taşınır (yük küçük kalsın)
+    expect(Object.keys(r.v.rows[0]).sort()).toEqual([
+      'amount_eur_cents', 'due_date', 'firm_code', 'firm_id', 'firm_name',
+      'no_date_flag', 'paid_eur_cents', 'remaining_eur_cents',
+    ])
     expect(r.v.rows.map((x: { amount_eur_cents: number }) => x.amount_eur_cents).sort()).toEqual([10000, 20000])
     // sorumlu eşlemesi aynı yanıtta
     expect(r.v.sorumlu['00000000-0000-0000-0000-0000000000f1']).toBe('PAZ')

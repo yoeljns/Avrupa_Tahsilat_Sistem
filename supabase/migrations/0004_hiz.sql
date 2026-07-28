@@ -63,22 +63,16 @@ begin
   return jsonb_build_object(
     'run_id', v_run,
     'rows', case when v_run is null then '[]'::jsonb else coalesce((
+      -- YALNIZ matrisin kullandığı alanlar: taşınan veri yarıya iner
       select jsonb_agg(jsonb_build_object(
-        'installment_id', s.installment_id,
-        'invoice_id', s.invoice_id,
         'firm_id', s.firm_id,
         'firm_code', s.firm_code,
         'firm_name', s.firm_name,
-        'side', s.side,
-        'seq', s.seq,
         'due_date', s.due_date,
-        'invoice_date', s.invoice_date,
-        'fis_no', s.fis_no,
         'amount_eur_cents', s.amount_eur_cents,
         'remaining_eur_cents', s.remaining_eur_cents,
         'paid_eur_cents', s.paid_eur_cents,
-        'no_date_flag', s.no_date_flag,
-        'source', s.source)
+        'no_date_flag', s.no_date_flag)
         order by s.due_date, s.firm_code, s.installment_id)
       from public.v_installments_scope s
       where p_side is null or s.side = p_side), '[]'::jsonb) end,
