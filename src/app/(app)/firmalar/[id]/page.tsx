@@ -160,10 +160,12 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                               düzenlendi
                             </span>
                           </>
+                        ) : tarihsiz ? (
+                          <span className="text-amber-600">tarih girilmedi — irsaliye tarihi kullanıldı</span>
                         ) : etkinPlan ? (
                           <>Plan: {etkinPlan}</>
                         ) : (
-                          <span className="text-amber-600">tarih girilmedi — irsaliye tarihi kullanıldı</span>
+                          <>Plan yok — vade irsaliye tarihi</>
                         )}
                       </div>
                     </td>

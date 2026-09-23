@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 // SAĞLIK / HIZ KONTROLÜ (herkese açık, veri döndürmez): uygulamanın koştuğu
 // bölge ve veritabanına gidiş-dönüş süresi. Yavaşlık şikâyetinde ilk bakılacak
-// yer: aynı bölgedeyse tur ~1-5 ms, okyanus aşırıysa ~90+ ms olur.
+// yer: aynı bölgedeyse HTTPS turu ~30-40 ms, okyanus aşırıysa ~100+ ms olur.
 
 export async function GET() {
   const bolge = process.env.VERCEL_REGION ?? 'yerel'
@@ -37,8 +37,8 @@ export async function GET() {
       yorum:
         enHizli === null
           ? 'Ölçüm alınamadı.'
-          : enHizli < 30
-            ? 'Uygulama ve veritabanı aynı bölgede.'
+          : enHizli < 60
+            ? 'Uygulama ve veritabanı aynı bölgede (normal).'
             : 'Uygulama veritabanından uzak: her sorgu ' + enHizli + ' ms yol alıyor.',
       hata,
     },

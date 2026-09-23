@@ -111,7 +111,7 @@ yeniden hesaplanır.
 | Pazarlamacı hiç firma göremiyor | Bayi listesindeki `pazarlamaci_email` ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayi Listesi**'nden dosyayı güncelleyin. |
 | İçe aktarma "yetkiniz yok" diyor | İçe aktarmayı yalnız Yönetici ve Tahsilat Yöneticisi yapabilir. |
 | Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı tazeleyebilirsiniz. |
-| Sayfalar yavaş açılıyor | `https://<adresiniz>/api/saglik` açın: `sunucu_bolgesi` `fra1` ve `en_hizli_tur_ms` 30'un altında olmalı. Değilse Vercel'de son dağıtımın üretimde olduğunu ve `vercel.json`'daki bölgeyi kontrol edin. |
+| Sayfalar yavaş açılıyor | `https://<adresiniz>/api/saglik` açın: `sunucu_bolgesi` `fra1` ve `en_hizli_tur_ms` 60'ın altında olmalı (normalde ~35). Değilse Vercel'de son dağıtımın üretimde olduğunu ve `vercel.json`'daki bölgeyi kontrol edin. |
 
 ## Geliştiriciler için
 

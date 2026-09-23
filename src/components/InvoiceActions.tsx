@@ -146,7 +146,7 @@ export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={close}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 text-left" onClick={close}>
           <div
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
