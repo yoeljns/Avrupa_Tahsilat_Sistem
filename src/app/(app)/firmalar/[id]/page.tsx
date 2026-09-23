@@ -164,9 +164,10 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                           <span className="text-amber-600">tarih girilmedi — irsaliye tarihi kullanıldı</span>
                         ) : etkinPlan ? (
                           <>Plan: {etkinPlan}</>
-                        ) : (
+                        ) : insts.length > 0 && insts.every((t) => t.source === 'default_invoice_date') ? (
+                          // Yalnız vade gerçekten irsaliye tarihinden geldiyse; plandan kurulmuş taksitlerde yanlış olurdu
                           <>Plan yok — vade irsaliye tarihi</>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
