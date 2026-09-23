@@ -1,11 +1,13 @@
+import { Fragment } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import InvoiceActions from '@/components/InvoiceActions'
 import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
-import { SALE_TYPE_LABELS, eur, todayISO, trDate } from '@/lib/format'
+import { SALE_TYPE_LABELS, eur, todayISO, trDate, trMonth } from '@/lib/format'
 import { firmaDetay, type FirmaDetay, type FirmaDetayTahsis, type FirmaDetayTaksit } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
+import { gunAdi, gunFarki } from '@/lib/takvim'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,8 +23,15 @@ function vadeListesi(taksitler: FirmaDetayTaksit[]): string {
   return tarihler.map((d) => trDate(d)).join(' · ')
 }
 
-export default async function FirmaDetayPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function FirmaDetayPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ tum?: string }>
+}) {
   const { id } = await params
+  const tumTaksitler = (await searchParams).tum === '1'
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound()
   const session = (await getSessionProfile())!
   const staff = isStaffRole(session.role)
@@ -60,6 +69,22 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
   const acikVadeli = installments.filter((t) => t.side === 'VADELI' && (t.remaining_eur_cents ?? 0) > 0)
   const gecikmis = acikVadeli.filter((t) => t.due_date < today).reduce((s, t) => s + (t.remaining_eur_cents ?? 0), 0)
   const ilkVade = acikVadeli.map((t) => t.due_date).sort()[0] ?? null
+
+  // Vade takvimi: tahsise giren (kalanı hesaplanmış) taksitler, aya göre gruplu
+  const vadeGruplari: Array<{ ay: string; kalan: number; taksitler: FirmaDetayTaksit[] }> = []
+  const buAy = today.slice(0, 7)
+  for (const t of installments
+    .filter((x) => x.remaining_eur_cents !== null)
+    .sort((a, b) => (a.due_date < b.due_date ? -1 : a.due_date > b.due_date ? 1 : a.seq - b.seq))) {
+    const ay = t.due_date.slice(0, 7)
+    let g = vadeGruplari[vadeGruplari.length - 1]
+    if (!g || g.ay !== ay) vadeGruplari.push((g = { ay, kalan: 0, taksitler: [] }))
+    g.taksitler.push(t)
+    g.kalan += t.remaining_eur_cents ?? 0
+  }
+  // Tamamen ödenmiş GEÇMİŞ aylar varsayılan olarak tek satıra katlanır (okunaklılık)
+  const katlanan = (g: { ay: string; kalan: number }) => !tumTaksitler && g.kalan <= 0 && g.ay < buAy
+  const katlananSayisi = vadeGruplari.filter(katlanan).length
 
   return (
     <div>
@@ -221,43 +246,105 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
         </div>
       </section>
 
-      {/* Açık taksitler */}
+      {/* Vade takvimi: tahsise giren tüm taksitler aya göre; durum bugüne göre */}
       <section className="mt-8" id="taksitler">
-        <h2 className="font-semibold text-slate-900">Açık Taksitler</h2>
-        <div className="mt-2 overflow-x-auto rounded-2xl bg-white shadow-sm">
-          <table className="w-full min-w-max text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-2">Vade</th>
-                <th className="px-3 py-2">Fiş No</th>
-                <th className="px-3 py-2">Taraf</th>
-                <th className="px-3 py-2 text-right">Taksit €</th>
-                <th className="px-3 py-2 text-right">Kalan €</th>
-              </tr>
-            </thead>
-            <tbody>
-              {installments
-                .filter((t) => (t.remaining_eur_cents ?? 0) > 0)
-                .map((t) => {
-                  const inv = invoiceById.get(t.invoice_id)
-                  const overdue = t.due_date < today
-                  return (
-                    <tr key={t.id} className="border-b border-slate-100">
-                      <td className={'px-3 py-2 ' + (overdue ? 'font-semibold text-red-600' : '')}>
-                        {trDate(t.due_date)}
-                        {t.no_date_flag && <span className="ml-1 text-amber-500" title="Vade tarihi girilmedi — irsaliye tarihi kullanıldı">†</span>}
-                        {t.source === 'manual' && <span className="ml-1 text-xs text-blue-600" title="Elle girilen taksit">✎</span>}
-                      </td>
-                      <td className="px-3 py-2">{inv?.fis_no}</td>
-                      <td className="px-3 py-2">{t.side === 'PESIN' ? 'Peşin' : 'Konsinye'}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{eur(t.amount_eur_cents)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums font-medium">{eur(t.remaining_eur_cents)}</td>
-                    </tr>
-                  )
-                })}
-            </tbody>
-          </table>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-semibold text-slate-900">Vade Takvimi</h2>
+          <p className="text-xs text-slate-500">
+            Tahsise giren taksitler aya göre · ödenenler soluk · durum bugüne göre
+            {katlananSayisi > 0 && (
+              <>
+                {' · '}
+                <Link href={`/firmalar/${id}?tum=1#taksitler`} className="font-medium text-blue-700 hover:underline">
+                  ödenmiş {katlananSayisi} ayı da göster
+                </Link>
+              </>
+            )}
+            {tumTaksitler && (
+              <>
+                {' · '}
+                <Link href={`/firmalar/${id}#taksitler`} className="font-medium text-blue-700 hover:underline">
+                  ödenmiş geçmiş ayları katla
+                </Link>
+              </>
+            )}
+          </p>
         </div>
+        {vadeGruplari.length === 0 ? (
+          <p className="mt-2 rounded-2xl bg-white p-5 text-sm text-slate-500 shadow-sm">Tahsise giren taksit yok.</p>
+        ) : (
+          <div className="mt-2 overflow-x-auto rounded-2xl bg-white shadow-sm">
+            <table className="w-full min-w-max text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2">Vade</th>
+                  <th className="px-3 py-2">Fiş No</th>
+                  <th className="px-3 py-2">Tip</th>
+                  <th className="px-3 py-2 text-right">Taksit €</th>
+                  <th className="px-3 py-2 text-right">Ödenen €</th>
+                  <th className="px-3 py-2 text-right">Kalan €</th>
+                  <th className="px-3 py-2">Durum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vadeGruplari.map((g) => (
+                  <Fragment key={g.ay}>
+                    <tr className="border-b border-slate-100 bg-slate-50/70">
+                      <td colSpan={7} className="px-3 py-1.5 text-xs font-semibold text-slate-600">
+                        {trMonth(g.ay)}
+                        <span className="ml-2 font-normal text-slate-400">
+                          {g.kalan > 0 ? <>kalan <span className="tabular-nums">{eur(g.kalan)}</span></> : 'tamamı ödendi'}
+                          {katlanan(g) && ` · ${g.taksitler.length} taksit`}
+                        </span>
+                      </td>
+                    </tr>
+                    {!katlanan(g) && g.taksitler.map((t) => {
+                      const inv = invoiceById.get(t.invoice_id)
+                      const kalan = t.remaining_eur_cents ?? 0
+                      const odenen = t.amount_eur_cents - kalan
+                      const fark = gunFarki(today, t.due_date)
+                      const durum =
+                        kalan <= 0
+                          ? { metin: 'Ödendi', sinif: 'bg-emerald-50 text-emerald-700' }
+                          : fark < 0
+                            ? { metin: `${-fark} gün gecikti`, sinif: 'bg-red-50 text-red-700 font-semibold' }
+                            : fark === 0
+                              ? { metin: 'Bugün', sinif: 'bg-amber-50 text-amber-800 font-semibold' }
+                              : fark <= 6
+                                ? { metin: `${fark} gün kaldı`, sinif: 'bg-amber-50 text-amber-800' }
+                                : { metin: `${fark} gün sonra`, sinif: 'bg-slate-100 text-slate-600' }
+                      return (
+                        <tr key={t.id} className={'border-b border-slate-100 ' + (kalan <= 0 ? 'text-slate-400' : '')}>
+                          <td className={'px-3 py-2 whitespace-nowrap ' + (kalan > 0 && fark < 0 ? 'font-semibold text-red-600' : '')}>
+                            <span className="text-xs text-slate-400">{gunAdi(t.due_date)}</span> {trDate(t.due_date)}
+                            {t.no_date_flag && (
+                              <span className="ml-1 text-amber-500" title="Vade tarihi girilmedi — irsaliye tarihi kullanıldı">
+                                †
+                              </span>
+                            )}
+                            {t.source === 'manual' && (
+                              <span className="ml-1 text-xs text-blue-600" title="Elle girilen taksit">
+                                ✎
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">{inv?.fis_no}</td>
+                          <td className="px-3 py-2">{inv ? (SALE_TYPE_LABELS[inv.sale_type] ?? inv.sale_type) : t.side === 'PESIN' ? 'Peşin' : 'Konsinye'}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{eur(t.amount_eur_cents)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{odenen > 0 ? eur(odenen) : '–'}</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-medium">{kalan > 0 ? eur(kalan) : '–'}</td>
+                          <td className="px-3 py-2">
+                            <span className={'rounded-md px-1.5 py-0.5 text-xs whitespace-nowrap ' + durum.sinif}>{durum.metin}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {/* Ödemeler ve eşleştirmeler */}

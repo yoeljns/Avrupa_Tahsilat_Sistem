@@ -13,7 +13,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
       <p className="mt-2 text-sm text-slate-600">
         Hata sürüyorsa ve sistemi yeni güncellediyseniz, Supabase SQL Editor&apos;de{' '}
         <code className="rounded bg-slate-100 px-1">supabase/migrations</code> klasöründeki{' '}
-        <strong>0002 → 0005</strong> dosyalarını sırayla çalıştırıp{' '}
+        <strong>0002 → 0006</strong> dosyalarını sırayla çalıştırıp{' '}
         <strong>Pano → Yeniden Hesapla</strong>&apos;ya basın (README, adım 4).
       </p>
       {error.digest && <p className="mt-3 text-xs text-slate-400">Hata kodu: {error.digest}</p>}

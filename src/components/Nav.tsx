@@ -36,7 +36,7 @@ export default function Nav({ role, email }: NavProps) {
   }
 
   return (
-    <header className="border-b border-slate-200 bg-white">
+    <header className="border-b border-slate-200 bg-white print:hidden">
       <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
         <Link href="/" className="text-base font-bold text-slate-900">
           Avrupa Tahsilat

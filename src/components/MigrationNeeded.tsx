@@ -14,7 +14,7 @@ export default function MigrationNeeded() {
         </li>
         <li>
           Repodaki <code className="rounded bg-amber-100 px-1">supabase/migrations</code> klasöründeki dosyaları{' '}
-          <strong>sırayla</strong> (0002 → 0003 → 0004 → 0005) yapıştırıp her birinde <strong>Run</strong> deyin.
+          <strong>sırayla</strong> (0002 → 0003 → 0004 → 0005 → 0006) yapıştırıp her birinde <strong>Run</strong> deyin.
           Daha önce çalıştırdıklarınızı yeniden çalıştırmak zarar vermez.
         </li>
         <li>

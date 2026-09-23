@@ -91,68 +91,74 @@ export async function GET() {
   XLSX.utils.book_append_sheet(wb, aoaSheet(flat('VADELI'), [10, 10, 32, 20, 12, 12, 11, 11, 11, 14]), 'Konsinye Borçlar')
   XLSX.utils.book_append_sheet(wb, aoaSheet(flat('PESIN'), [10, 10, 32, 20, 12, 12, 11, 11, 11, 14]), 'Peşin Borçlar')
 
-  // 3) Takvim matrisi (Konsinye) — her tarihte BORÇ | ÖDEME | KALAN
-  const vadeli = scope.filter((r) => r.side === 'VADELI')
-  const dates = Array.from(new Set(vadeli.map((r) => r.due_date))).sort()
+  // 3) Takvim matrisleri — kullanıcının referans Excel düzeni: her tarihte BORÇ | ÖDEME | KALAN
   interface Agg {
     borc: number
     odeme: number
     kalan: number
   }
-  const byFirm = new Map<string, { code: string; name: string; sorumlu: string; cells: Map<string, Agg>; totB: number; totO: number; totK: number }>()
-  for (const r of vadeli) {
-    let f = byFirm.get(r.firm_id)
-    if (!f) {
-      byFirm.set(r.firm_id, (f = { code: r.firm_code, name: r.firm_name, sorumlu: sorumluOf(r.firm_id), cells: new Map(), totB: 0, totO: 0, totK: 0 }))
+  const takvimSayfasi = (side: 'PESIN' | 'VADELI'): { matrix: CellValue[][]; widths: number[] } => {
+    const rows = scope.filter((r) => r.side === side)
+    const dates = Array.from(new Set(rows.map((r) => r.due_date))).sort()
+    const byFirm = new Map<string, { code: string; name: string; sorumlu: string; cells: Map<string, Agg>; totB: number; totO: number; totK: number }>()
+    for (const r of rows) {
+      let f = byFirm.get(r.firm_id)
+      if (!f) {
+        byFirm.set(r.firm_id, (f = { code: r.firm_code, name: r.firm_name, sorumlu: sorumluOf(r.firm_id), cells: new Map(), totB: 0, totO: 0, totK: 0 }))
+      }
+      let c = f.cells.get(r.due_date)
+      if (!c) f.cells.set(r.due_date, (c = { borc: 0, odeme: 0, kalan: 0 }))
+      c.borc += r.amount_eur_cents
+      c.odeme += r.paid_eur_cents
+      c.kalan += r.remaining_eur_cents
+      f.totB += r.amount_eur_cents
+      f.totO += r.paid_eur_cents
+      f.totK += r.remaining_eur_cents
     }
-    let c = f.cells.get(r.due_date)
-    if (!c) f.cells.set(r.due_date, (c = { borc: 0, odeme: 0, kalan: 0 }))
-    c.borc += r.amount_eur_cents
-    c.odeme += r.paid_eur_cents
-    c.kalan += r.remaining_eur_cents
-    f.totB += r.amount_eur_cents
-    f.totO += r.paid_eur_cents
-    f.totK += r.remaining_eur_cents
-  }
 
-  const header1: CellValue[] = ['', '', '', '', '', '']
-  const header2: CellValue[] = ['SORUMLU', 'FİRMA KODU', 'FİRMA ADI', 'TOPLAM BORÇ', 'ÖDEMELER', 'KALAN BORÇ']
-  for (const d of dates) {
-    header1.push(trDate(d), '', '')
-    header2.push('BORÇ', 'ÖDEME', 'KALAN')
-  }
-  const matrix: CellValue[][] = [header1, header2]
-  const sortedFirms = Array.from(byFirm.values()).sort((a, b) => (a.code < b.code ? -1 : 1))
-  for (const f of sortedFirms) {
-    const row: CellValue[] = [f.sorumlu, f.code, f.name, c2e(f.totB), c2e(f.totO), c2e(f.totK)]
+    const header1: CellValue[] = ['', '', '', '', '', '']
+    const header2: CellValue[] = ['SORUMLU', 'FİRMA KODU', 'FİRMA ADI', 'TOPLAM BORÇ', 'ÖDEMELER', 'KALAN BORÇ']
     for (const d of dates) {
-      const c = f.cells.get(d)
-      row.push(c2e(c?.borc ?? null), c2e(c?.odeme ?? null), c2e(c?.kalan ?? null))
+      header1.push(trDate(d), '', '')
+      header2.push('BORÇ', 'ÖDEME', 'KALAN')
     }
-    matrix.push(row)
+    const matrix: CellValue[][] = [header1, header2]
+    const sortedFirms = Array.from(byFirm.values()).sort((a, b) => (a.code < b.code ? -1 : 1))
+    for (const f of sortedFirms) {
+      const row: CellValue[] = [f.sorumlu, f.code, f.name, c2e(f.totB), c2e(f.totO), c2e(f.totK)]
+      for (const d of dates) {
+        const c = f.cells.get(d)
+        row.push(c2e(c?.borc ?? null), c2e(c?.odeme ?? null), c2e(c?.kalan ?? null))
+      }
+      matrix.push(row)
+    }
+    const totalRow: CellValue[] = [
+      '',
+      '',
+      'TOPLAM',
+      c2e(sortedFirms.reduce((s, f) => s + f.totB, 0)),
+      c2e(sortedFirms.reduce((s, f) => s + f.totO, 0)),
+      c2e(sortedFirms.reduce((s, f) => s + f.totK, 0)),
+    ]
+    const gunToplam = new Map<string, Agg>()
+    for (const r of rows) {
+      let t = gunToplam.get(r.due_date)
+      if (!t) gunToplam.set(r.due_date, (t = { borc: 0, odeme: 0, kalan: 0 }))
+      t.borc += r.amount_eur_cents
+      t.odeme += r.paid_eur_cents
+      t.kalan += r.remaining_eur_cents
+    }
+    for (const d of dates) {
+      const t = gunToplam.get(d)!
+      totalRow.push(c2e(t.borc), c2e(t.odeme), c2e(t.kalan))
+    }
+    matrix.push(totalRow)
+    return { matrix, widths: [10, 10, 28, 12, 12, 12, ...dates.flatMap(() => [11, 11, 11])] }
   }
-  const totalRow: CellValue[] = [
-    '',
-    '',
-    'TOPLAM',
-    c2e(sortedFirms.reduce((s, f) => s + f.totB, 0)),
-    c2e(sortedFirms.reduce((s, f) => s + f.totO, 0)),
-    c2e(sortedFirms.reduce((s, f) => s + f.totK, 0)),
-  ]
-  for (const d of dates) {
-    const rows = vadeli.filter((r) => r.due_date === d)
-    totalRow.push(
-      c2e(rows.reduce((s, r) => s + r.amount_eur_cents, 0)),
-      c2e(rows.reduce((s, r) => s + r.paid_eur_cents, 0)),
-      c2e(rows.reduce((s, r) => s + r.remaining_eur_cents, 0)),
-    )
-  }
-  matrix.push(totalRow)
-  XLSX.utils.book_append_sheet(
-    wb,
-    aoaSheet(matrix, [10, 10, 28, 12, 12, 12, ...dates.flatMap(() => [11, 11, 11])]),
-    'Konsinye Takvim',
-  )
+  const konsinyeTakvim = takvimSayfasi('VADELI')
+  XLSX.utils.book_append_sheet(wb, aoaSheet(konsinyeTakvim.matrix, konsinyeTakvim.widths), 'Konsinye Takvim')
+  const pesinTakvim = takvimSayfasi('PESIN')
+  XLSX.utils.book_append_sheet(wb, aoaSheet(pesinTakvim.matrix, pesinTakvim.widths), 'Peşin Takvim')
 
   // 4) Bakiyeler ve alacaklar
   const credits: CellValue[][] = [

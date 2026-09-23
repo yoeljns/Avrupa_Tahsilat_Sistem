@@ -1,74 +1,15 @@
-import Link from 'next/link'
-import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
-import MonthMatrix from '@/components/MonthMatrix'
-import { getSessionProfile, isStaffRole } from '@/lib/auth'
-import { addMonths, eur, monthOf, todayISO, trMonth } from '@/lib/format'
-import { matrisAy, type MatrisAy } from '@/lib/queries'
-import { createServerSupabase } from '@/lib/supabase/server'
+import TakvimSayfasi from '@/components/takvim/TakvimSayfasi'
 
 export const dynamic = 'force-dynamic'
 
-export default async function KonsinyePage({ searchParams }: { searchParams: Promise<{ ay?: string }> }) {
-  const session = (await getSessionProfile())!
-  const staff = isStaffRole(session.role)
-  const supabase = await createServerSupabase()
-  const params = await searchParams
-  const month = /^\d{4}-\d{2}$/.test(params.ay ?? '') ? params.ay! : monthOf(todayISO())
-
-  // TEK ağ turu: ay matrisi veritabanında toplanmış olarak gelir
-  let veri: MatrisAy
-  try {
-    veri = await matrisAy(supabase, 'VADELI', month)
-  } catch (e) {
-    if (isMissingRelationError(e)) return <MigrationNeeded />
-    throw e
-  }
-  const o = veri.ozet
-
+export default async function KonsinyePage({ searchParams }: { searchParams: Promise<{ ay?: string; kategori?: string }> }) {
   return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-bold text-slate-900">Konsinye / Konsinye Peşin</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Ödenen: <strong className="tabular-nums text-emerald-600">{eur(o?.toplam_odenen ?? 0)}</strong>
-            {' '}· Kalan borç: <strong className="tabular-nums">{eur(o?.toplam_kalan ?? 0)}</strong>
-            {(o?.gecikmis ?? 0) > 0 && (
-              <>
-                {' '}· vadesi geçmiş: <strong className="tabular-nums text-red-600">{eur(o!.gecikmis)}</strong>
-              </>
-            )}
-            {(o?.tarihsiz_adet ?? 0) > 0 && (
-              <span className="ml-2 text-amber-600" title="Vade tarihi girilmemiş taksitler irsaliye tarihiyle listelenir">
-                † {o!.tarihsiz_adet} taksitte tarih girilmedi
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {staff && (
-            <a
-              href="/api/export/borclar"
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Excel İndir
-            </a>
-          )}
-          <nav className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white p-1 text-sm">
-            <Link href={`/konsinye?ay=${addMonths(month, -1)}`} prefetch className="rounded px-2 py-1 hover:bg-slate-100">
-              ←
-            </Link>
-            <span className="px-2 font-medium">{trMonth(month)}</span>
-            <Link href={`/konsinye?ay=${addMonths(month, 1)}`} prefetch className="rounded px-2 py-1 hover:bg-slate-100">
-              →
-            </Link>
-          </nav>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <MonthMatrix firmalar={veri.firmalar} />
-      </div>
-    </div>
+    <TakvimSayfasi
+      taraf="VADELI"
+      yol="/konsinye"
+      baslik="Konsinye / Konsinye Peşin"
+      aciklama="Vade takvimi: her firmanın bu aydaki vadeleri, ödenen ve kalan tutarları. Renkler bugüne göredir."
+      arama={await searchParams}
+    />
   )
 }

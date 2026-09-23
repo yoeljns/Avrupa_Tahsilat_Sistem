@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { todayISO } from '@/lib/format'
+import { ayAraligi as ayAraligiHesapla, type TakvimFirmaSatiri } from '@/lib/takvim'
 
 // Okuma sayfalarının verisi — her sayfa TEK ağ turu (0005_hiz_rls.sql).
 // Kullanıcı oturumlu istemciyle çağrılır: RLS sayesinde pazarlamacı yalnız
@@ -15,12 +16,7 @@ async function rpc<T>(supabase: SupabaseClient, fn: string, args?: Record<string
   return data as T
 }
 
-/** 'YYYY-MM' → ayın ilk ve son günü (ISO) */
-export function ayAraligi(ay: string): { bas: string; son: string } {
-  const [y, m] = ay.split('-').map(Number)
-  const sonGun = new Date(Date.UTC(y, m, 0)).getUTCDate()
-  return { bas: `${ay}-01`, son: `${ay}-${String(sonGun).padStart(2, '0')}` }
-}
+export { ayAraligi } from '@/lib/takvim'
 
 // ---------------------------------------------------------------------------
 // Pano
@@ -174,47 +170,48 @@ export function firmaDetay(supabase: SupabaseClient, firmId: string): Promise<Fi
 // ---------------------------------------------------------------------------
 // Takvim matrisi (Konsinye / Peşin)
 // ---------------------------------------------------------------------------
-export interface MatrisFirma {
-  firm_id: string
-  kod: string
-  ad: string
-  sorumlu: string | null
-  toplam_borc: number
-  toplam_odeme: number
-  toplam_kalan: number
-  once_kalan: number
-  sonra_kalan: number
-  tarihsiz: boolean
-  /** vade günü (ISO) → [borç, ödeme, kalan] — yalnız seçili ay */
-  gunler: Record<string, [number, number, number]>
-}
-
-export interface MatrisAy {
+export interface TakvimVerisi {
   run_id: string | null
+  /** Tüm aylar (kategori süzgeci uygulanmış) */
   ozet: {
     toplam_borc: number
     toplam_odenen: number
     toplam_kalan: number
+    /** bugüne göre vadesi geçmiş kalan */
     gecikmis: number
+    /** bugün dahil 7 gün içinde vadesi gelen kalan */
+    yakin_7: number
     tarihsiz_adet: number
     yas_0_30: number
     yas_31_60: number
     yas_61_90: number
     yas_90p: number
   } | null
-  /** Verisi olan aylar ('YYYY-MM') — ay seçici için */
-  aylar: string[]
-  firmalar: MatrisFirma[]
+  /** Yalnız seçili ay */
+  ay_ozet: { borc: number; odeme: number; kalan: number; gecikmis: number } | null
+  /** Verisi olan aylar — ay seçici için */
+  aylar: Array<{ ay: string; borc: number; kalan: number }>
+  /** Bu taraftaki tipler (süzgeçten bağımsız) — süzgeç düğmeleri için */
+  kategoriler: Array<{ kod: string; borc: number; kalan: number; gecikmis: number; firma: number }>
+  firmalar: TakvimFirmaSatiri[]
 }
 
-export function matrisAy(
+/** Takvim sayfası verisi — tek ağ turu (0006_takvim.sql, rpc_takvim). */
+export function takvim(
   supabase: SupabaseClient,
   side: 'PESIN' | 'VADELI',
   ay: string,
+  kategori: string | null = null,
   bugun = todayISO(),
-): Promise<MatrisAy> {
-  const { bas, son } = ayAraligi(ay)
-  return rpc<MatrisAy>(supabase, 'rpc_matris_ay', { p_side: side, p_ay_bas: bas, p_ay_son: son, p_bugun: bugun })
+): Promise<TakvimVerisi> {
+  const { bas, son } = ayAraligiHesapla(ay)
+  return rpc<TakvimVerisi>(supabase, 'rpc_takvim', {
+    p_side: side,
+    p_ay_bas: bas,
+    p_ay_son: son,
+    p_bugun: bugun,
+    p_kategoriler: kategori ? [kategori] : null,
+  })
 }
 
 // ---------------------------------------------------------------------------

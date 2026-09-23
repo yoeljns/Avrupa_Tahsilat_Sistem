@@ -20,9 +20,12 @@ vade tarihi bazında takvim görünümünde izler, ödemeleri FIFO kuralıyla bo
   'KDV FATURA REFERANSI' kolonu veya açıklamadaki `0042-5TE1` deseni) ile **eşleşen irsaliyeden
   tamamı düşülür, kalan tutar taksitlendirilmiş kabul edilir**. Referansı çözülemeyen KDV
   ödemeleri tahsise girmez ve panelde "eşleşmedi" olarak görünür.
-- **Takvim görünümleri:** Konsinye/Konsinye Peşin ayrı, Peşin ayrı tabloda; satır = firma,
-  her vade günü için **BORÇ | ÖDEME | KALAN** üçlüsü, SORUMLU (pazarlamacı) sütunu,
-  devreden/gecikmiş ve firma toplamlarıyla — mevcut Excel tablonuzla aynı düzen.
+- **Takvim görünümleri:** Konsinye/Konsinye Peşin ayrı, Peşin ayrı sayfada; satır = firma.
+  **Sade** görünümde her vade günü (ya da haftası) tek hücre: kalan tutar, **bugüne göre** renkli
+  (vadesi geçti kırmızı · 7 gün içinde turuncu · ödendi yeşil); tıklayınca Borç · Ödeme · Kalan.
+  **Excel düzeni** görünümünde her vade için **BORÇ | ÖDEME | KALAN** üçlüsü — mevcut Excel
+  tablonuzla aynı düzen (Excel çıktısı da bu düzendedir). Firma arama, sorumlu / yalnız gecikmiş
+  süzgeçleri, satış tipi düğmeleri, sıralama, ay listesi, sabit başlık, yazdırma ve mobil görünüm.
 - **Tahsilat Yöneticisi düzenlemeleri:** İrsaliye iptali, tutar/tip/vade değişikliği, taksitleri elle
   düzenleme. Her değişiklik **denetim kaydına** işlenir; aynı dosya yeniden yüklendiğinde
   düzenlemeler **asla ezilmez**.
@@ -62,7 +65,7 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 1. [supabase.com/dashboard](https://supabase.com/dashboard) → projeniz → sol menüden **SQL Editor**.
 2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: **`supabase/migrations/0001_init.sql`** →
    **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** → **`0004_hiz.sql`** →
-   **`0005_hiz_rls.sql`** (her birinin içeriğini yapıştırıp **Run**).
+   **`0005_hiz_rls.sql`** → **`0006_takvim.sql`** (her birinin içeriğini yapıştırıp **Run**).
 3. Hepsinde "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
 
 > **Sistemi daha önce kurduysanız (güncelleme):** yalnız henüz çalıştırmadığınız migration
