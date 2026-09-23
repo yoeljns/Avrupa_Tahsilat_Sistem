@@ -7,9 +7,12 @@ import {
   auditInvoiceChange,
   effectiveType,
   loadInvoiceForOps,
+  overrideDegeri,
   refreshInstallmentSides,
   regenerateInstallments,
 } from '@/lib/invoiceOps'
+import { kategorileriYukle } from '@/lib/kategoriler'
+import { tarafHaritasi } from '@/lib/kategoriMeta'
 import { recomputeFirms } from '@/lib/recompute'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 
@@ -21,7 +24,8 @@ export const maxDuration = 120
 // Kayıttan sonra YALNIZ bu irsaliyenin firması yeniden hesaplanır (hızlı).
 
 const Body = z.object({
-  saleType: z.enum(['PESIN', 'KONSINYE', 'KONSINYE_PESIN', 'OTHER']).optional(),
+  /** Kategori kodu (panelden yönetilen kategoriler; 'OTHER' = sınıflandırılmadı) */
+  saleType: z.string().regex(/^[A-Z][A-Z0-9_]{1,29}$/).optional(),
   /** 'sıfırla' → override kaldırılır */
   amountEur: z.string().max(40).optional(),
   clearAmountOverride: z.boolean().optional(),
@@ -46,6 +50,14 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   const inv = await loadInvoiceForOps(admin, id)
   if (!inv) return NextResponse.json({ error: 'İrsaliye bulunamadı.' }, { status: 404 })
 
+  const kategoriler = await kategorileriYukle(admin)
+  const harita = tarafHaritasi(kategoriler)
+  if (body.saleType !== undefined && body.saleType !== effectiveType(inv)) {
+    const kat = kategoriler.find((k) => k.kod === body.saleType)
+    if (!kat) return NextResponse.json({ error: `Kategori bulunamadı: ${body.saleType}` }, { status: 400 })
+    if (!kat.aktif) return NextResponse.json({ error: `"${kat.ad}" kategorisi pasif; önce yönetim panelinden etkinleştirin.` }, { status: 400 })
+  }
+
   const updates: Record<string, unknown> = {}
   const audits: Array<{ action: string; field?: string; oldValue?: unknown; newValue?: unknown; reason?: string | null }> = []
   let needsInstallmentRegen = false
@@ -65,8 +77,8 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
       newValue: body.saleType,
       reason: body.reason ?? null,
     })
-    updates.sale_type_override = body.saleType === inv.sale_type_auto ? null : body.saleType
-    inv.sale_type_override = body.saleType === inv.sale_type_auto ? null : body.saleType
+    updates.sale_type_override = overrideDegeri(inv, body.saleType)
+    inv.sale_type_override = overrideDegeri(inv, body.saleType)
     needsSideRefresh = true
     needsInstallmentRegen = true // OTHER→tip: taksit yok → üretilmeli; tip→OTHER: kaldırılmalı
     updates.needs_review = false
@@ -178,9 +190,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   if (updateError) return NextResponse.json({ error: 'Kayıt güncellenemedi: ' + updateError.message }, { status: 500 })
 
   try {
-    if (needsSideRefresh) await refreshInstallmentSides(admin, inv)
+    if (needsSideRefresh) await refreshInstallmentSides(admin, inv, harita)
     if (needsInstallmentRegen) {
       const regen = await regenerateInstallments(admin, inv, {
+        tarafHaritasi: harita,
         dueDates: planDueDates,
         noDateFlag: planNoDate,
         source: planDueDates ? planSource : undefined,

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { randomBytes } from 'node:crypto'
-import { apiSession } from '@/lib/auth'
+import { apiSession, isSahip } from '@/lib/auth'
 import { writeAudit } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 
@@ -82,6 +82,10 @@ export async function POST(request: Request) {
   // update
   const { data: target } = await admin.from('profiles').select('id, email, role, is_active').eq('id', body.userId).maybeSingle()
   if (!target) return NextResponse.json({ error: 'Kullanıcı bulunamadı.' }, { status: 404 })
+  // Sistemin sahibinin hesabına (rol, durum, şifre) yalnız kendisi dokunabilir
+  if (isSahip(target.email) && !isSahip(session.email)) {
+    return NextResponse.json({ error: 'Bu hesap sistemin sahibine aittir; yalnız kendisi değiştirebilir.' }, { status: 403 })
+  }
   if (target.id === session.userId && (body.isActive === false || (body.role && body.role !== 'yonetici'))) {
     return NextResponse.json({ error: 'Kendi yönetici hesabınızı pasifleştiremez veya rolünüzü düşüremezsiniz.' }, { status: 400 })
   }

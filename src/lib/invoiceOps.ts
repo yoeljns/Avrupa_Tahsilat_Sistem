@@ -1,8 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildInstallments, scaleInstallmentAmounts } from '@/lib/engine/installments'
+import { normText } from '@/lib/engine/normalize'
 import { parseOdemePlani } from '@/lib/engine/planParser'
-import type { SaleType } from '@/lib/engine/types'
+import type { SaleType, Side } from '@/lib/engine/types'
 import { writeAudit, type AuditEntry } from '@/lib/db'
+import { kategorileriYukle } from '@/lib/kategoriler'
+import { tarafHaritasi, type Taraf } from '@/lib/kategoriMeta'
 
 // Tahsilat Yöneticisi'nin irsaliye düzenlemeleri: override yaz + taksitleri
 // tazele + denetim kaydı düş. Her başarılı düzenlemeden sonra çağıran taraf
@@ -22,6 +25,18 @@ export interface InvoiceForOps {
   cancelled_at: string | null
   excluded_override: boolean | null
   plan_override_note: string | null
+  turu_raw: string
+}
+
+/**
+ * Elle seçilen tipin nasıl saklanacağı. Normalde otomatikle aynıysa override
+ * yazılmaz (NULL). İADE irsaliyesinde ise seçim her zaman yazılır: iade ancak
+ * yönetici tipini AÇIKÇA seçerse borca girer (0005 kuralı) — aynı tip seçildi
+ * diye NULL'a indirgenirse seçim etkisiz kalıyordu.
+ */
+export function overrideDegeri(inv: Pick<InvoiceForOps, 'sale_type_auto' | 'turu_raw'>, secilen: SaleType): SaleType | null {
+  const iade = normText(inv.turu_raw).includes('IADE')
+  return secilen === inv.sale_type_auto && !iade ? null : secilen
 }
 
 export function effectiveType(inv: InvoiceForOps): SaleType {
@@ -32,17 +47,56 @@ export function effectiveAmount(inv: InvoiceForOps): number | null {
   return inv.amount_eur_cents_override ?? inv.amount_eur_cents
 }
 
-export function sideOfType(t: SaleType): 'PESIN' | 'VADELI' | null {
-  if (t === 'PESIN') return 'PESIN'
-  if (t === 'KONSINYE' || t === 'KONSINYE_PESIN') return 'VADELI'
-  return null
+const VARSAYILAN_HARITA = tarafHaritasi(undefined)
+
+/**
+ * Kategori → davranış (PESIN/VADELI; null = hesaba katılmaz/sınıflandırılmadı).
+ * Harita verilmezse bugünkü sabit kategoriler kullanılır.
+ */
+export function sideOfType(t: SaleType, harita: ReadonlyMap<string, Taraf> = VARSAYILAN_HARITA): Side | null {
+  return harita.get(t) ?? null
+}
+
+/** Veritabanındaki kategorilerden davranış haritası (bir istekte bir kez yükleyin) */
+export async function tarafHaritasiYukle(admin: SupabaseClient): Promise<Map<string, Taraf>> {
+  return tarafHaritasi(await kategorileriYukle(admin))
+}
+
+export interface OtomatikTaksitGirdisi {
+  id: string
+  firm_id: string
+  invoice_date: string
+  odeme_plani_raw: string
+  plan_override_note: string | null
+  amount: number
+}
+
+/**
+ * Plan metninden (yönetici planı ?? dosyadaki plan) otomatik taksit satırları —
+ * SAF. regenerateInstallments ve toplu yeniden sınıflandırma aynı kuralı kullanır.
+ */
+export function otomatikTaksitSatirlari(inv: OtomatikTaksitGirdisi, side: Side): Record<string, unknown>[] {
+  const plan = parseOdemePlani(inv.plan_override_note ?? inv.odeme_plani_raw, inv.invoice_date)
+  const source = plan.status === 'empty_default' || plan.status === 'unparsed' ? 'default_invoice_date' : 'auto_plan'
+  const noDateFlag = plan.status === 'empty_default' && side === 'VADELI'
+  return buildInstallments(inv.amount, plan.dueDates).map((b) => ({
+    invoice_id: inv.id,
+    firm_id: inv.firm_id,
+    side,
+    seq: b.seq,
+    due_date: b.dueDate,
+    amount_eur_cents: b.amountCents,
+    source,
+    no_date_flag: noDateFlag,
+    remaining_eur_cents: null,
+  }))
 }
 
 export async function loadInvoiceForOps(admin: SupabaseClient, id: string): Promise<InvoiceForOps | null> {
   const { data } = await admin
     .from('invoices')
     .select(
-      'id, fis_no, firm_id, invoice_date, odeme_plani_raw, plan_parse_status, sale_type_auto, sale_type_override, amount_eur_cents, amount_eur_cents_override, cancelled_at, excluded_override, plan_override_note',
+      'id, fis_no, firm_id, invoice_date, odeme_plani_raw, plan_parse_status, sale_type_auto, sale_type_override, amount_eur_cents, amount_eur_cents_override, cancelled_at, excluded_override, plan_override_note, turu_raw',
     )
     .eq('id', id)
     .maybeSingle()
@@ -79,10 +133,12 @@ export async function regenerateInstallments(
     noDateFlag?: boolean
     source?: 'auto_plan' | 'default_invoice_date' | 'manual'
     force?: boolean
+    /** kategori → davranış; verilmezse veritabanından yüklenir */
+    tarafHaritasi?: ReadonlyMap<string, Taraf>
   } = {},
 ): Promise<{ durum: RegenDurumu; adet: number }> {
   const type = effectiveType(inv)
-  const side = sideOfType(type)
+  const side = sideOfType(type, opts.tarafHaritasi ?? (await tarafHaritasiYukle(admin)))
   const amount = effectiveAmount(inv)
 
   const { data: existingRaw, error: selError } = await admin
@@ -169,8 +225,12 @@ export async function regenerateInstallments(
 }
 
 /** Taksitlerin side alanını etkin tipe göre günceller (tip değişince). */
-export async function refreshInstallmentSides(admin: SupabaseClient, inv: InvoiceForOps): Promise<void> {
-  const side = sideOfType(effectiveType(inv))
+export async function refreshInstallmentSides(
+  admin: SupabaseClient,
+  inv: InvoiceForOps,
+  harita?: ReadonlyMap<string, Taraf>,
+): Promise<void> {
+  const side = sideOfType(effectiveType(inv), harita ?? (await tarafHaritasiYukle(admin)))
   if (side === null) return
   const { error } = await admin.from('installments').update({ side }).eq('invoice_id', inv.id)
   if (error) throw new Error('Taksit tarafı güncellenemedi: ' + error.message)

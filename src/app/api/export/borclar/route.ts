@@ -5,6 +5,9 @@ import { fetchAll } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 import { aoaSheet, c2e, workbookResponse, type CellValue } from '@/lib/export/xlsxUtil'
 import { trDate } from '@/lib/format'
+import { isMissingRelationError } from '@/components/MigrationNeeded'
+import { kategorileriYukle } from '@/lib/kategoriler'
+import { kategoriEtiketi } from '@/lib/kategoriMeta'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -24,6 +27,8 @@ interface ScopeRow {
   remaining_eur_cents: number
   paid_eur_cents: number
   no_date_flag: boolean
+  /** 0007: etkin satış kategorisi */
+  kategori?: string
 }
 
 export async function GET() {
@@ -31,15 +36,20 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: 'Bu rapor için yetkiniz yok.' }, { status: 403 })
 
   const admin = createAdminSupabase()
-  const scope = await fetchAll<ScopeRow>((from, to) =>
-    admin
-      .from('v_installments_scope')
-      .select('firm_id, firm_code, firm_name, side, due_date, invoice_date, fis_no, amount_eur_cents, remaining_eur_cents, paid_eur_cents, no_date_flag')
-      .order('due_date')
-      .order('firm_code')
-      .order('installment_id')
-      .range(from, to),
-  )
+  const kolonlar = 'firm_id, firm_code, firm_name, side, due_date, invoice_date, fis_no, amount_eur_cents, remaining_eur_cents, paid_eur_cents, no_date_flag'
+  const kapsam = (secim: string) =>
+    fetchAll<ScopeRow>((from, to) =>
+      admin.from('v_installments_scope').select(secim).order('due_date').order('firm_code').order('installment_id').range(from, to) as unknown as PromiseLike<{
+        data: ScopeRow[] | null
+        error: { message: string } | null
+      }>,
+    )
+  // Kategori kolonu 0007 ile gelir; göç henüz yoksa rapor kategorisiz üretilir
+  const scope = await kapsam(kolonlar + ', kategori').catch((e) => {
+    if (isMissingRelationError(e)) return kapsam(kolonlar)
+    throw e
+  })
+  const kategoriler = await kategorileriYukle(admin)
 
   const { data: runRow } = await admin.from('v_current_run').select('run_id').maybeSingle()
   interface BalRow {
@@ -70,7 +80,7 @@ export async function GET() {
   const wb = XLSX.utils.book_new()
 
   // 1-2) Düz listeler
-  const flatHead = ['Sorumlu', 'Firma Kodu', 'Firma', 'Fiş No', 'İrsaliye Tarihi', 'Vade', 'Borç €', 'Ödenen €', 'Kalan €', 'Not']
+  const flatHead = ['Sorumlu', 'Firma Kodu', 'Firma', 'Fiş No', 'Kategori', 'İrsaliye Tarihi', 'Vade', 'Borç €', 'Ödenen €', 'Kalan €', 'Not']
   const flat = (side: 'PESIN' | 'VADELI'): CellValue[][] => [
     flatHead,
     ...scope
@@ -80,6 +90,7 @@ export async function GET() {
         r.firm_code,
         r.firm_name,
         r.fis_no,
+        r.kategori ? kategoriEtiketi(kategoriler, r.kategori) : '',
         trDate(r.invoice_date),
         trDate(r.due_date),
         c2e(r.amount_eur_cents),
@@ -88,8 +99,8 @@ export async function GET() {
         r.no_date_flag ? 'tarih girilmedi' : '',
       ]),
   ]
-  XLSX.utils.book_append_sheet(wb, aoaSheet(flat('VADELI'), [10, 10, 32, 20, 12, 12, 11, 11, 11, 14]), 'Konsinye Borçlar')
-  XLSX.utils.book_append_sheet(wb, aoaSheet(flat('PESIN'), [10, 10, 32, 20, 12, 12, 11, 11, 11, 14]), 'Peşin Borçlar')
+  XLSX.utils.book_append_sheet(wb, aoaSheet(flat('VADELI'), [10, 10, 32, 20, 16, 12, 12, 11, 11, 11, 14]), 'Konsinye Borçlar')
+  XLSX.utils.book_append_sheet(wb, aoaSheet(flat('PESIN'), [10, 10, 32, 20, 16, 12, 12, 11, 11, 11, 14]), 'Peşin Borçlar')
 
   // 3) Takvim matrisleri — kullanıcının referans Excel düzeni: her tarihte BORÇ | ÖDEME | KALAN
   interface Agg {

@@ -11,9 +11,21 @@ export interface SessionProfile {
   role: Role
 }
 
+/** Sistemin sahibi: veri sıfırlama yalnız bu hesaba açıktır; başka yönetici bu hesabı değiştiremez. */
+export const SAHIP_EPOSTA = 'yy@avrupagroup.com'
+
+export function isSahip(email: string | null | undefined): boolean {
+  return (email ?? '').trim().toLowerCase() === SAHIP_EPOSTA
+}
+
 /** Staff = irsaliye düzenleme, içe aktarma ve dışa aktarma yetkisi olan roller. */
 export function isStaffRole(role: Role): boolean {
   return role === 'yonetici' || role === 'tahsilat_yoneticisi'
+}
+
+/** Yönetim ayarlarını (kullanıcılar, kategoriler, kurallar) değiştirebilen rol. */
+export function isAdminRole(role: Role): boolean {
+  return role === 'yonetici'
 }
 
 /**

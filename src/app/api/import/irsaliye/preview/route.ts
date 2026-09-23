@@ -4,6 +4,7 @@ import { chunkedWrite } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 import { diffIrsaliye } from '@/lib/import/diff'
 import { parseIrsaliyeXls } from '@/lib/import/irsaliyeParser'
+import { gecerliKodlar, kategorileriYukle, kuralImzasi, kurallariYukle } from '@/lib/kategoriler'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -23,9 +24,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Dosya 15 MB sınırını aşıyor.' }, { status: 400 })
   }
 
+  // Satış kategorisi panelden yönetilen kurallarla belirlenir (0007)
+  const admin = createAdminSupabase()
+  const [kategoriler, kurallar] = await Promise.all([kategorileriYukle(admin), kurallariYukle(admin)])
+
   let parsed
   try {
-    parsed = parseIrsaliyeXls(await file.arrayBuffer())
+    parsed = parseIrsaliyeXls(await file.arrayBuffer(), kurallar, gecerliKodlar(kategoriler))
   } catch (e) {
     return NextResponse.json(
       { error: 'Dosya okunamadı. Geçerli bir Excel (.xls/.xlsx) olduğundan emin olun. Detay: ' + (e instanceof Error ? e.message : String(e)) },
@@ -36,8 +41,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.warnings.join(' ') || 'Dosyada irsaliye satırı bulunamadı.' }, { status: 400 })
   }
 
-  const admin = createAdminSupabase()
-  const { rows } = await diffIrsaliye(admin, parsed.records)
+  const { rows, existingByFisNo } = await diffIrsaliye(admin, parsed.records)
 
   const { data: batch, error: batchError } = await admin
     .from('import_batches')
@@ -83,7 +87,15 @@ export async function POST(request: Request) {
     invalid: parsed.invalids.slice(0, 20),
   }
 
-  await admin.from('import_batches').update({ stats: counts }).eq('id', batch.id)
+  // Kurallar değiştiği için tipi değişecek mevcut irsaliyeler (elle sınıflandırılmışlar hariç)
+  const tipDegisecek = parsed.records.filter((r) => {
+    const ex = existingByFisNo.get(r.fisNo)
+    return !!ex && ex.sale_type_override === null && ex.sale_type_auto !== r.saleTypeAuto
+  }).length
+  if (tipDegisecek > 0) counts.tip_degisecek = tipDegisecek
+
+  // Kural imzası: uygulama anında kurallar değişmişse önizleme bayat sayılır
+  await admin.from('import_batches').update({ stats: { ...counts, kural_imzasi: kuralImzasi(kurallar, kategoriler) } }).eq('id', batch.id)
 
   return NextResponse.json({
     batchId: batch.id,

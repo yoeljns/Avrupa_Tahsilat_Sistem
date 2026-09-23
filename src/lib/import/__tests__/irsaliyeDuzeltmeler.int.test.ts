@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
 import { Pool, types } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { gocler, gocSql } from '@/lib/__tests__/testVeritabani'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { classifySaleType } from '@/lib/engine/classify'
 import { isDec31 } from '@/lib/engine/dates'
@@ -116,9 +115,8 @@ describe.skipIf(!SOCKET)('irsaliye yeniden içe aktarma: düzenlemeler korunur, 
         if not exists (select from pg_roles where rolname='anon') then create role anon nologin; end if;
         if not exists (select from pg_roles where rolname='service_role') then create role service_role nologin bypassrls; end if;
       end $do$;`)
-    for (const f of ['0001_init.sql', '0002_havuz_tahsis.sql', '0003_kdv_eslestirme.sql', '0004_hiz.sql', '0005_hiz_rls.sql']) {
-      await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations', f), 'utf8'))
-    }
+    // TÜM göçler: sonraki göçlerin (0006, 0007 …) bu davranışı bozmadığı da doğrulanır
+    for (const f of gocler()) await pool.query(gocSql(f))
     admin = createPgShim(pool)
 
     // İLK YÜKLEME

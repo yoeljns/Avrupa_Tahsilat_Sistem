@@ -1,7 +1,10 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
+import { useToast } from '@/components/ui/Toast'
+import { DAVRANISLAR, atanabilirKategoriler, davranisOf, type KategoriMeta } from '@/lib/kategoriMeta'
 
 // Sınıflandırma bekleyen (OTHER) irsaliyeler için toplu onay tablosu.
 
@@ -17,14 +20,14 @@ export interface ReviewRow {
   reason: string | null
 }
 
-const TYPES = [
-  { value: 'PESIN', label: 'Peşin' },
-  { value: 'KONSINYE', label: 'Konsinye' },
-  { value: 'KONSINYE_PESIN', label: 'Konsinye Peşin' },
-]
-
-export default function ReviewClassifyTable({ rows }: { rows: ReviewRow[] }) {
+export default function ReviewClassifyTable({ rows, kategoriler }: { rows: ReviewRow[]; kategoriler?: readonly KategoriMeta[] }) {
   const router = useRouter()
+  const toast = useToast()
+  // Seçenekler yönetim panelindeki aktif kategorilerden; "hesaba katılmaz" olanlar belirtilir
+  const TYPES = atanabilirKategoriler(kategoriler).map((k) => ({
+    value: k.kod,
+    label: k.taraf === null ? `${k.ad} (${DAVRANISLAR[davranisOf(k.taraf)].kisa.toLocaleLowerCase('tr')})` : k.ad,
+  }))
   const [selected, setSelected] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -66,6 +69,7 @@ export default function ReviewClassifyTable({ rows }: { rows: ReviewRow[] }) {
         return
       }
       setSelected({})
+      toast(`${body?.applied ?? items.length} irsaliye sınıflandırıldı; ilgili firmalar yeniden hesaplandı.`)
       router.refresh()
     } catch {
       setError('Sunucuya ulaşılamadı.')
@@ -95,6 +99,12 @@ export default function ReviewClassifyTable({ rows }: { rows: ReviewRow[] }) {
           {busy ? 'Uygulanıyor…' : `Seçilenleri Onayla (${chosenCount})`}
         </button>
         {error && <span className="text-sm text-red-600">{error}</span>}
+        <span className="ml-auto text-xs text-slate-500">
+          Benzer çok sayıda irsaliye mi var?{' '}
+          <Link href="/yonetim/kurallar" className="font-medium text-blue-700 hover:underline">
+            Tanıma kuralıyla toplu çözün →
+          </Link>
+        </span>
       </div>
 
       <div className="mt-3 overflow-x-auto rounded-2xl bg-white shadow-sm">

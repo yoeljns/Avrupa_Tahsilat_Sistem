@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { apiSession } from '@/lib/auth'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 import { commitIrsaliyeBatch } from '@/lib/import/commitIrsaliye'
+import { KuralDegistiHatasi } from '@/lib/kategoriler'
 
 export const runtime = 'nodejs'
 export const maxDuration = 120
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
     const stats = await commitIrsaliyeBatch(admin, parsed.data.batchId, session.email)
     return NextResponse.json({ ok: true, stats })
   } catch (e) {
+    if (e instanceof KuralDegistiHatasi) return NextResponse.json({ error: e.message }, { status: 409 })
     return NextResponse.json({ error: e instanceof Error ? e.message : 'İçe aktarma başarısız.' }, { status: 500 })
   }
 }

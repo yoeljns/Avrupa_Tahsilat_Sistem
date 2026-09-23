@@ -4,6 +4,7 @@ import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationN
 import ReviewClassifyTable, { type ReviewRow } from '@/components/ReviewClassifyTable'
 import { requireRole } from '@/lib/auth'
 import { eur, trDate } from '@/lib/format'
+import { kategoriBul } from '@/lib/kategoriMeta'
 import { incelemeVerisi, type IncelemeIrsaliye, type IncelemeVerisi } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
@@ -47,7 +48,9 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
   const invoices = veri.irsaliyeler.filter((i) => !(i.excluded_override ?? i.is_excluded_firm))
   const active = invoices.filter((i) => !i.is_cancelled)
   const classification = active.filter((i) => i.sale_type === 'OTHER' && !i.is_31_12 && !i.is_iade)
-  const planIssues = active.filter((i) => i.plan_parse_status === 'unparsed' && i.sale_type !== 'OTHER' && !i.is_31_12)
+  // Plan yalnız borç hesabına giren kategorilerde önemlidir ("hesaba katılmaz" ve sınıflandırılmamış hariç)
+  const hesapta = (kod: string) => (kategoriBul(veri.kategoriler, kod)?.taraf ?? null) !== null
+  const planIssues = active.filter((i) => i.plan_parse_status === 'unparsed' && hesapta(i.sale_type) && !i.is_31_12)
   const conflicts = active.filter((i) => i.raw_changed_after_override)
   const iadeler = active.filter((i) => i.is_iade && !i.is_31_12)
   const diger = active.filter(
@@ -98,6 +101,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
       <div className="mt-4">
         {tab === 'siniflandirma' && (
           <ReviewClassifyTable
+            kategoriler={veri.kategoriler}
             rows={classification.map(
               (i): ReviewRow => ({
                 id: i.id,

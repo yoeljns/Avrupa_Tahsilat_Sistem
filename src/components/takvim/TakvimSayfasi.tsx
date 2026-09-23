@@ -2,7 +2,8 @@ import Link from 'next/link'
 import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import StatCard from '@/components/StatCard'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
-import { SALE_TYPE_LABELS, eur, monthOf, todayISO, trMonth } from '@/lib/format'
+import { eur, monthOf, todayISO, trMonth } from '@/lib/format'
+import { kategoriEtiketi } from '@/lib/kategoriMeta'
 import { takvim, type TakvimVerisi } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 import AySecici from './AySecici'
@@ -42,7 +43,7 @@ export default async function TakvimSayfasi({ taraf, yol, baslik, aciklama, aram
   }
   const o = veri.ozet
   const ao = veri.ay_ozet
-  const etiket = (kod: string) => SALE_TYPE_LABELS[kod] ?? kod
+  const etiket = (kod: string) => kategoriEtiketi(veri.kategori_meta, kod)
   const ayAdi = trMonth(ay)
 
   const ogeler: OzetOgesi[] =
@@ -114,7 +115,7 @@ export default async function TakvimSayfasi({ taraf, yol, baslik, aciklama, aram
         </p>
       )}
 
-      <KategoriSuzgeci yol={yol} ay={ay} kategoriler={veri.kategoriler} secili={kategori} etiket={etiket} />
+      <KategoriSuzgeci yol={yol} ay={ay} kategoriler={veri.kategoriler} secili={kategori} etiket={etiket} meta={veri.kategori_meta} />
 
       <div className="mt-4">
         <VadeTakvimi

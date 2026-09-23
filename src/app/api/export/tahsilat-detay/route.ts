@@ -5,6 +5,8 @@ import { fetchAll } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 import { aoaSheet, c2e, workbookResponse, type CellValue } from '@/lib/export/xlsxUtil'
 import { trDate } from '@/lib/format'
+import { kategorileriYukle } from '@/lib/kategoriler'
+import { kategoriEtiketi } from '@/lib/kategoriMeta'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -61,10 +63,13 @@ export async function GET() {
   interface InvRow {
     id: string
     fis_no: string
+    sale_type_auto: string
+    sale_type_override: string | null
   }
   const invoices = await fetchAll<InvRow>((from, to) =>
-    admin.from('invoices').select('id, fis_no').order('id').range(from, to),
+    admin.from('invoices').select('id, fis_no, sale_type_auto, sale_type_override').order('id').range(from, to),
   )
+  const kategoriler = await kategorileriYukle(admin)
   interface InstRow {
     id: string
     due_date: string
@@ -80,12 +85,17 @@ export async function GET() {
   const invById = new Map(invoices.map((i) => [i.id, i]))
   const instById = new Map(installments.map((i) => [i.id, i]))
   const payById = new Map(payments.map((p) => [p.id, p]))
+  /** İrsaliyenin etkin satış kategorisinin adı (yönetim panelindeki adıyla) */
+  const kategoriOf = (invoiceId: string) => {
+    const i = invById.get(invoiceId)
+    return i ? kategoriEtiketi(kategoriler, i.sale_type_override ?? i.sale_type_auto) : ''
+  }
 
   const wb = XLSX.utils.book_new()
 
   // 1) Eşleştirmeler
   const matches: CellValue[][] = [
-    ['İşlem Kodu', 'Ödeme Tarihi', 'Firma Kodu', 'Firma', 'Taraf', 'Fiş No', 'Taksit Vadesi', 'Tahsis €'],
+    ['İşlem Kodu', 'Ödeme Tarihi', 'Firma Kodu', 'Firma', 'Taraf', 'Fiş No', 'Kategori', 'Taksit Vadesi', 'Tahsis €'],
     ...allocations.map((a): CellValue[] => {
       const p = payById.get(a.payment_id)
       const f = firmById.get(a.firm_id)
@@ -96,12 +106,13 @@ export async function GET() {
         f?.name ?? '',
         a.side === 'PESIN' ? 'Peşin' : 'Vadeli',
         invById.get(a.invoice_id)?.fis_no ?? '',
+        kategoriOf(a.invoice_id),
         trDate(instById.get(a.installment_id)?.due_date ?? null),
         c2e(a.amount_eur_cents),
       ]
     }),
   ]
-  XLSX.utils.book_append_sheet(wb, aoaSheet(matches, [20, 12, 10, 32, 8, 20, 12, 12]), 'Eşleştirmeler')
+  XLSX.utils.book_append_sheet(wb, aoaSheet(matches, [20, 12, 10, 32, 8, 20, 16, 12, 12]), 'Eşleştirmeler')
 
   // 2) Eşleşmemiş ödemeler (alacak kalanı)
   const allocatedByPayment = new Map<string, number>()
@@ -142,6 +153,7 @@ export async function GET() {
 
   // 3) Açık taksitler
   interface OpenRow {
+    invoice_id: string
     firm_code: string
     firm_name: string
     side: string
@@ -152,24 +164,25 @@ export async function GET() {
   const open = await fetchAll<OpenRow>((from, to) =>
     admin
       .from('v_open_installments')
-      .select('firm_code, firm_name, side, due_date, fis_no, remaining_eur_cents')
+      .select('invoice_id, firm_code, firm_name, side, due_date, fis_no, remaining_eur_cents')
       .order('due_date')
       .order('firm_code')
       .order('installment_id')
       .range(from, to),
   )
   const openSheet: CellValue[][] = [
-    ['Vade', 'Firma Kodu', 'Firma', 'Taraf', 'Fiş No', 'Kalan €'],
+    ['Vade', 'Firma Kodu', 'Firma', 'Taraf', 'Fiş No', 'Kategori', 'Kalan €'],
     ...open.map((r): CellValue[] => [
       trDate(r.due_date),
       r.firm_code,
       r.firm_name,
       r.side === 'PESIN' ? 'Peşin' : 'Vadeli',
       r.fis_no,
+      kategoriOf(r.invoice_id),
       c2e(r.remaining_eur_cents),
     ]),
   ]
-  XLSX.utils.book_append_sheet(wb, aoaSheet(openSheet, [12, 10, 32, 8, 20, 12]), 'Açık Taksitler')
+  XLSX.utils.book_append_sheet(wb, aoaSheet(openSheet, [12, 10, 32, 8, 20, 16, 12]), 'Açık Taksitler')
 
   const today = new Date().toISOString().slice(0, 10)
   return workbookResponse(wb, `tahsilat_detay_${today}.xlsx`)

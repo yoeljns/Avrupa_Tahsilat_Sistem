@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { todayISO } from '@/lib/format'
+import type { Kural } from '@/lib/engine/kurallar'
+import type { KategoriMeta, Taraf } from '@/lib/kategoriMeta'
 import { ayAraligi as ayAraligiHesapla, type TakvimFirmaSatiri } from '@/lib/takvim'
 
 // Okuma sayfalarının verisi — her sayfa TEK ağ turu (0005_hiz_rls.sql).
@@ -40,6 +42,22 @@ export interface PanoOzeti {
   } | null
   vade: { gecikmis: number; gun7: number; gun30: number } | null
   inceleme: { adet: number; tutar: number } | null
+  /** 0007: hesaba katılan her kategorinin açık ve (bugüne göre) gecikmiş borcu */
+  kategoriler?: PanoKategori[]
+}
+
+export interface PanoKategori {
+  kod: string
+  ad: string
+  kisa_ad: string | null
+  renk: string
+  taraf: Taraf
+  sira: number
+  aktif: boolean
+  panoda_kart: boolean
+  acik: number
+  gecikmis: number
+  firma: number
 }
 
 export function panoOzeti(supabase: SupabaseClient, bugun = todayISO()): Promise<PanoOzeti> {
@@ -160,6 +178,8 @@ export interface FirmaDetay {
   taksitler: FirmaDetayTaksit[]
   odemeler: FirmaDetayOdeme[]
   tahsisler: FirmaDetayTahsis[]
+  /** 0007: kategori etiketleri, renkleri ve davranışları */
+  kategoriler?: KategoriMeta[]
 }
 
 /** Firma görünmüyorsa (yok ya da yetki dışı) null. */
@@ -194,6 +214,8 @@ export interface TakvimVerisi {
   /** Bu taraftaki tipler (süzgeçten bağımsız) — süzgeç düğmeleri için */
   kategoriler: Array<{ kod: string; borc: number; kalan: number; gecikmis: number; firma: number }>
   firmalar: TakvimFirmaSatiri[]
+  /** 0007: kategori etiketleri, renkleri ve süzgeç ayarları */
+  kategori_meta?: KategoriMeta[]
 }
 
 /** Takvim sayfası verisi — tek ağ turu (0006_takvim.sql, rpc_takvim). */
@@ -259,8 +281,83 @@ export interface IncelemeTarihsiz {
 export interface IncelemeVerisi {
   irsaliyeler: IncelemeIrsaliye[]
   tarihsiz: IncelemeTarihsiz[]
+  /** 0007: atama seçenekleri */
+  kategoriler?: KategoriMeta[]
 }
 
 export function incelemeVerisi(supabase: SupabaseClient): Promise<IncelemeVerisi> {
   return rpc<IncelemeVerisi>(supabase, 'rpc_inceleme')
+}
+
+// ---------------------------------------------------------------------------
+// Yönetim paneli (0007)
+// ---------------------------------------------------------------------------
+export interface YonetimOzeti {
+  kullanicilar: { toplam: number; aktif: number; yonetici: number; tahsilat_yoneticisi: number; pazarlamaci: number }
+  firmalar: { toplam: number; takip_disi: number; sorumlusuz: number; sorumlu_eslesmeyen: number }
+  /** Firmalarda yazılı ama aktif kullanıcıyla eşleşmeyen sorumlu e-postaları */
+  eslesmeyen_sorumlular: string[]
+  son_kosu: {
+    started_at: string
+    finished_at: string | null
+    triggered_by: string | null
+    trigger_kind: string
+    kdv_eslesmeyen: number | null
+    kdv_eslesen: number | null
+  } | null
+  saglik: { siniflandirilmamis: number; siniflandirilmamis_tutar: number; inceleme: number; cakisma: number; plan_okunamadi: number }
+  tarihsiz_taksit: number
+  son_aktarimlar: Array<{
+    id: string
+    kind: string
+    filename: string | null
+    uploaded_by: string | null
+    status: string
+    created_at: string
+    committed_at: string | null
+    stats: Record<string, unknown> | null
+  }>
+  son_degisiklikler: Array<{
+    id: number
+    actor_email: string | null
+    entity_type: string
+    entity_id: string
+    action: string
+    field: string | null
+    created_at: string
+  }>
+  kategoriler: Array<{ kod: string; ad: string; renk: string; taraf: Taraf; aktif: boolean; acik: number; gecikmis: number }>
+}
+
+/** Staff değilse null (fonksiyon içeride denetler). */
+export function yonetimOzeti(supabase: SupabaseClient, bugun = todayISO()): Promise<YonetimOzeti | null> {
+  return rpc<YonetimOzeti | null>(supabase, 'rpc_yonetim_ozeti', { p_bugun: bugun })
+}
+
+export interface KategoriKullanimi extends KategoriMeta {
+  updated_at: string | null
+  updated_by: string | null
+  /** Bu kategorideki (etkin tipi bu olan) irsaliye sayısı */
+  irsaliye: number
+  /** Bunlardan hesaba/tahsise giren */
+  tahsisteki: number
+  /** Elle (override) bu kategoriye atanmış olan */
+  elle: number
+  firma: number
+  tutar: number
+  /** Elle taksit girilmiş irsaliye sayısı */
+  elle_taksitli: number
+  /** Açık (ödenmemiş) borç, kuruş */
+  acik: number
+  /** Bu kategoriyi hedefleyen kural sayısı */
+  kural: number
+}
+
+export interface KategoriYonetimi {
+  kategoriler: KategoriKullanimi[]
+  kurallar: Kural[]
+}
+
+export function kategoriYonetimi(supabase: SupabaseClient): Promise<KategoriYonetimi> {
+  return rpc<KategoriYonetimi>(supabase, 'rpc_kategori_yonetimi')
 }

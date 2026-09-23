@@ -114,6 +114,16 @@ export async function runRecompute(
 ): Promise<RecomputeStats> {
   const asOf = todayISO()
 
+  // Kendini onarma (ucuz): taksit tarafları etkin kategorinin davranışıyla aynı
+  // olmalı. Normalde hiçbir satır değişmez; 0007 henüz yoksa fonksiyon yoktur → atla.
+  {
+    const { error } = await admin.rpc('taksit_taraf_esitle', { p_invoice_ids: null })
+    // yalnız "fonksiyon yok" hatası yutulur; başka her hata (yetki, zaman aşımı) hesabı durdurur
+    if (error && !/PGRST202|42883|Could not find the function|function .* does not exist/i.test(`${error.message} ${(error as { code?: string }).code ?? ''}`)) {
+      throw new Error('Taksit tarafları eşitlenemedi: ' + error.message)
+    }
+  }
+
   // 0) Koşuyu ÖNCE aç: başlangıç anı, hesap sürerken gelen düzenlemeleri
   //    yakalamak için referanstır (işaretçi çevrilene kadar kimse görmez).
   const { data: run, error: runError } = await admin

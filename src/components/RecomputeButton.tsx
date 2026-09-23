@@ -2,9 +2,13 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { RefreshCw } from 'lucide-react'
+import Button from '@/components/ui/Button'
+import { useToast } from '@/components/ui/Toast'
 
 export default function RecomputeButton() {
   const router = useRouter()
+  const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -18,6 +22,7 @@ export default function RecomputeButton() {
         setError(body?.error ?? 'Hesaplama başarısız.')
         return
       }
+      toast('Tüm firmalar yeniden hesaplandı.')
       router.refresh()
     } catch {
       setError('Sunucuya ulaşılamadı.')
@@ -28,13 +33,9 @@ export default function RecomputeButton() {
 
   return (
     <span className="inline-flex items-center gap-2">
-      <button
-        onClick={run}
-        disabled={busy}
-        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-      >
+      <Button onClick={run} loading={busy} icon={<RefreshCw className="h-4 w-4" aria-hidden="true" />}>
         {busy ? 'Hesaplanıyor…' : 'Yeniden Hesapla'}
-      </button>
+      </Button>
       {error && <span className="text-xs text-red-600">{error}</span>}
     </span>
   )

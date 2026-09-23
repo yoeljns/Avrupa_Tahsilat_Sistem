@@ -2,9 +2,11 @@ import { Fragment } from 'react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import InvoiceActions from '@/components/InvoiceActions'
+import KategoriRozeti from '@/components/KategoriRozeti'
 import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
-import { SALE_TYPE_LABELS, eur, todayISO, trDate, trMonth } from '@/lib/format'
+import { eur, todayISO, trDate, trMonth } from '@/lib/format'
+import { SINIFSIZ_KOD, kategoriBul, kategoriEtiketi, tarafAdlari } from '@/lib/kategoriMeta'
 import { firmaDetay, type FirmaDetay, type FirmaDetayTahsis, type FirmaDetayTaksit } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { gunAdi, gunFarki } from '@/lib/takvim'
@@ -49,6 +51,9 @@ export default async function FirmaDetayPage({
 
   const { firma: firm, irsaliyeler: invoices, taksitler: installments, odemeler: payments, tahsisler: allocations } = veri
   const bal = veri.bakiye
+  const kategoriler = veri.kategoriler
+  /** Kategorisi "hesaba katılmaz" olan (sınıflandırılmamış hariç) irsaliye */
+  const hesapDisiMi = (kod: string) => kod !== SINIFSIZ_KOD && kategoriBul(kategoriler, kod)?.taraf === null
 
   const instByInvoice = new Map<string, FirmaDetayTaksit[]>()
   for (const t of installments) {
@@ -86,6 +91,17 @@ export default async function FirmaDetayPage({
   const katlanan = (g: { ay: string; kalan: number }) => !tumTaksitler && g.kalan <= 0 && g.ay < buAy
   const katlananSayisi = vadeGruplari.filter(katlanan).length
 
+  // Açık borcun kategori kırılımı (iki ve daha fazla kategoride borç varsa gösterilir)
+  const kategoriKirilimi = new Map<string, number>()
+  for (const t of installments) {
+    const kalan = t.remaining_eur_cents ?? 0
+    const inv = invoiceById.get(t.invoice_id)
+    if (kalan > 0 && inv) kategoriKirilimi.set(inv.sale_type, (kategoriKirilimi.get(inv.sale_type) ?? 0) + kalan)
+  }
+  const kirilim = Array.from(kategoriKirilimi.entries()).sort(
+    (a, b) => (kategoriBul(kategoriler, a[0])?.sira ?? 999) - (kategoriBul(kategoriler, b[0])?.sira ?? 999),
+  )
+
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -107,7 +123,9 @@ export default async function FirmaDetayPage({
       {/* Bakiye kartları */}
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl bg-white p-5 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Konsinye Açık Borç</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500" title={tarafAdlari(kategoriler, 'VADELI')}>
+            Konsinye Açık Borç
+          </p>
           <p className="mt-2 text-2xl font-bold tabular-nums">{eur(bal?.vadeli_open_eur_cents ?? 0)}</p>
           <p className="mt-1 text-xs text-slate-500">
             Vadesi geçmiş: <span className="tabular-nums text-red-600">{eur(gecikmis)}</span>
@@ -115,7 +133,9 @@ export default async function FirmaDetayPage({
           </p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Peşin Açık Borç</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500" title={tarafAdlari(kategoriler, 'PESIN')}>
+            Peşin Açık Borç
+          </p>
           <p className="mt-2 text-2xl font-bold tabular-nums">{eur(bal?.pesin_open_eur_cents ?? 0)}</p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm">
@@ -129,6 +149,18 @@ export default async function FirmaDetayPage({
           <p className="mt-1 text-xs text-slate-500">Fazla ödeme — bir sonraki borçtan düşülür</p>
         </div>
       </div>
+
+      {kirilim.length >= 2 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm shadow-sm">
+          <span className="text-xs font-medium tracking-wide text-slate-500 uppercase">Açık borç kategorileri</span>
+          {kirilim.map(([kod, tutar]) => (
+            <span key={kod} className="inline-flex items-center gap-1.5">
+              <KategoriRozeti kod={kod} meta={kategoriler} />
+              <span className="tabular-nums font-semibold text-slate-800">{eur(tutar)}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* İrsaliyeler */}
       <section className="mt-8">
@@ -155,13 +187,16 @@ export default async function FirmaDetayPage({
                 const tarihsiz = insts.some((t) => t.no_date_flag)
                 const etkinPlan = inv.plan_override_note ?? inv.odeme_plani_raw
                 return (
-                  <tr key={inv.id} className={'border-b border-slate-100 align-top ' + (inv.is_cancelled ? 'opacity-50' : '')}>
+                  <tr
+                    key={inv.id}
+                    className={'border-b border-slate-100 align-top ' + (inv.is_cancelled ? 'opacity-50' : hesapDisiMi(inv.sale_type) ? 'bg-slate-50/70 text-slate-500' : '')}
+                  >
                     <td className="px-3 py-2 font-medium">{inv.fis_no}</td>
                     <td className="px-3 py-2">{trDate(inv.invoice_date)}</td>
                     <td className="px-3 py-2">
-                      {SALE_TYPE_LABELS[inv.sale_type] ?? inv.sale_type}
+                      <KategoriRozeti kod={inv.sale_type} meta={kategoriler} />
                       {inv.sale_type_override && (
-                        <span className="ml-1 rounded bg-blue-100 px-1 text-xs text-blue-700" title={`İçe aktarılan: ${SALE_TYPE_LABELS[inv.sale_type_auto]}`}>
+                        <span className="ml-1 rounded bg-blue-100 px-1 text-xs text-blue-700" title={`İçe aktarılan: ${kategoriEtiketi(kategoriler, inv.sale_type_auto)}`}>
                           düzenlendi
                         </span>
                       )}
@@ -216,7 +251,12 @@ export default async function FirmaDetayPage({
                       {(inv.excluded_override ?? inv.is_excluded_firm) && !inv.is_31_12 && !inv.is_cancelled && (
                         <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-600">Takip dışı</span>
                       )}
-                      {inv.sale_type === 'OTHER' && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">Sınıflandırma bekliyor</span>}
+                      {inv.sale_type === SINIFSIZ_KOD && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">Sınıflandırma bekliyor</span>}
+                      {hesapDisiMi(inv.sale_type) && (
+                        <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-600" title="Bu kategori borç hesabına girmez; bilgi olarak listelenir">
+                          Hesaba katılmaz
+                        </span>
+                      )}
                       {inv.raw_changed_after_override && (
                         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700" title="Düzenleme sonrası içe aktarılan veri değişti — kontrol edin">Çakışma</span>
                       )}
@@ -235,6 +275,7 @@ export default async function FirmaDetayPage({
                             planOverride: inv.plan_override_note,
                             installments: insts.map((t) => ({ dueDate: t.due_date, amountCents: t.amount_eur_cents, source: t.source })),
                           }}
+                          kategoriler={kategoriler}
                         />
                       </td>
                     )}
@@ -329,7 +370,9 @@ export default async function FirmaDetayPage({
                             )}
                           </td>
                           <td className="px-3 py-2">{inv?.fis_no}</td>
-                          <td className="px-3 py-2">{inv ? (SALE_TYPE_LABELS[inv.sale_type] ?? inv.sale_type) : t.side === 'PESIN' ? 'Peşin' : 'Konsinye'}</td>
+                          <td className="px-3 py-2">
+                            {inv ? <KategoriRozeti kod={inv.sale_type} meta={kategoriler} kisa /> : t.side === 'PESIN' ? 'Peşin' : 'Konsinye'}
+                          </td>
                           <td className="px-3 py-2 text-right tabular-nums">{eur(t.amount_eur_cents)}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{odenen > 0 ? eur(odenen) : '–'}</td>
                           <td className="px-3 py-2 text-right tabular-nums font-medium">{kalan > 0 ? eur(kalan) : '–'}</td>

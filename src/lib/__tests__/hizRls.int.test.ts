@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs'
-import path from 'node:path'
 import { Pool, types } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { gocler, gocSql } from './testVeritabani'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createPgShim } from '@/lib/import/__tests__/pgShim'
 import { loadInvoiceForOps, regenerateInstallments } from '@/lib/invoiceOps'
@@ -160,9 +159,8 @@ describe.skipIf(!SOCKET)('0005: RLS + sayfa RPC + firma bazlı hesap', () => {
     await p.end()
     pool = new Pool({ host: SOCKET, port: PORT, user: 'postgres', database: DB, max: 6 })
     await pool.query(AUTH_STUB)
-    for (const f of ['0001_init.sql', '0002_havuz_tahsis.sql', '0003_kdv_eslestirme.sql', '0004_hiz.sql', '0005_hiz_rls.sql']) {
-      await pool.query(readFileSync(path.join(process.cwd(), 'supabase/migrations', f), 'utf8'))
-    }
+    // TÜM göçler: sonraki göçlerin (0006, 0007 …) bu davranışı bozmadığı da doğrulanır
+    for (const f of gocler()) await pool.query(gocSql(f))
     // Supabase'in varsayılan hibeleri (yerel Postgres'te elle verilir)
     await pool.query(`
       grant usage on schema public to authenticated, anon;

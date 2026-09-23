@@ -1,7 +1,11 @@
 // Alan modeli tipleri — motor saf kalır, I/O içermez.
 
-/** Satış tipi: Belge No sütunundan türetilir. */
-export type SaleType = 'PESIN' | 'KONSINYE' | 'KONSINYE_PESIN' | 'OTHER'
+/**
+ * Satış tipi (kategori kodu): Belge No / Türü kurallarıyla belirlenir.
+ * Kategoriler panelden yönetilir (sale_categories); sistem kodları PESIN,
+ * KONSINYE, KONSINYE_PESIN ve OTHER (sınıflandırılmadı) her zaman vardır.
+ */
+export type SaleType = string
 
 /**
  * Borç tarafı: PESIN irsaliyeleri "peşin borç", KONSINYE + KONSINYE_PESIN
@@ -23,8 +27,8 @@ export interface PlanParseResult {
 
 export interface ClassifyResult {
   type: SaleType
-  /** OTHER için sezgisel öneri — asla otomatik uygulanmaz. */
-  suggested?: Exclude<SaleType, 'OTHER'>
+  /** OTHER için öneri (ONER kuralı) — asla otomatik uygulanmaz. */
+  suggested?: SaleType
   needsReview: boolean
   reason: string
 }

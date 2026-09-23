@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { apiSession } from '@/lib/auth'
+import { apiSession, isSahip, SAHIP_EPOSTA } from '@/lib/auth'
 import { resetAllData } from '@/lib/resetData'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 
@@ -8,17 +8,15 @@ export const runtime = 'nodejs'
 export const maxDuration = 120
 
 // TÜM ödeme + irsaliye verisini sıfırlama.
-// YALNIZ yy@avrupagroup.com (yönetici) çalıştırabilir; onay metni zorunludur.
-
-const RESET_ALLOWED_EMAIL = 'yy@avrupagroup.com'
+// YALNIZ sistemin sahibi (SAHIP_EPOSTA, yönetici) çalıştırabilir; onay metni zorunludur.
 
 const Body = z.object({ confirm: z.string() })
 
 export async function POST(request: Request) {
   const session = await apiSession(['yonetici'])
-  if (!session || session.email.toLowerCase() !== RESET_ALLOWED_EMAIL) {
+  if (!session || !isSahip(session.email)) {
     return NextResponse.json(
-      { error: 'Bu işlemi yalnız yy@avrupagroup.com yapabilir.' },
+      { error: `Bu işlemi yalnız ${SAHIP_EPOSTA} yapabilir.` },
       { status: 403 },
     )
   }

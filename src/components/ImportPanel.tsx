@@ -31,6 +31,7 @@ const COUNT_LABELS: Record<string, { label: string; tone: string }> = {
   needs_review: { label: 'İnceleme Bekleyecek', tone: 'text-amber-700 bg-amber-50' },
   excluded_31_12: { label: '31/12 (hariç)', tone: 'text-slate-600 bg-slate-100' },
   invalid: { label: 'Geçersiz', tone: 'text-red-700 bg-red-50' },
+  tip_degisecek: { label: 'Kategorisi değişecek (tanıma kuralları)', tone: 'text-violet-700 bg-violet-50' },
 }
 
 export default function ImportPanel({ kind, title, description, accept }: ImportPanelProps) {

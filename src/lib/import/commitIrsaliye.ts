@@ -3,6 +3,8 @@ import { buildInstallments, scaleInstallmentAmounts } from '@/lib/engine/install
 import { parseOdemePlani } from '@/lib/engine/planParser'
 import type { PlanParseStatus, SaleType } from '@/lib/engine/types'
 import { chunkedWrite, fetchAll, writeAudit, type AuditEntry } from '@/lib/db'
+import { KuralDegistiHatasi, kategorileriYukle, kuralImzasi, kurallariYukle } from '@/lib/kategoriler'
+import { tarafHaritasi } from '@/lib/kategoriMeta'
 import { runRecompute } from '@/lib/recompute'
 import type { IrsaliyeRecord } from './irsaliyeParser'
 
@@ -47,12 +49,6 @@ function effectiveSaleType(auto: SaleType, override: SaleType | null): SaleType 
   return override ?? auto
 }
 
-function sideOf(t: SaleType): 'PESIN' | 'VADELI' | null {
-  if (t === 'PESIN') return 'PESIN'
-  if (t === 'KONSINYE' || t === 'KONSINYE_PESIN') return 'VADELI'
-  return null
-}
-
 interface ExistingInstallment {
   id: string
   invoice_id: string
@@ -79,12 +75,19 @@ export async function commitIrsaliyeBatch(
   // 1) Batch + staged satırlar
   const { data: batch, error: batchError } = await admin
     .from('import_batches')
-    .select('id, kind, status')
+    .select('id, kind, status, stats')
     .eq('id', batchId)
     .maybeSingle()
   if (batchError || !batch) throw new Error('İçe aktarma kaydı bulunamadı.')
   if (batch.kind !== 'irsaliye') throw new Error('Bu kayıt bir irsaliye içe aktarımı değil.')
   if (batch.status !== 'preview') throw new Error('Bu içe aktarma zaten uygulanmış veya iptal edilmiş.')
+
+  // Sınıflandırma ÖNİZLEMEDE yapıldı; kurallar o zamandan beri değiştiyse
+  // önizleme bayattır (yanlış tiple yazılmasın) → yeniden önizleme istenir.
+  const [kategoriler, kurallar] = await Promise.all([kategorileriYukle(admin), kurallariYukle(admin)])
+  const onizlemeImzasi = (batch.stats as { kural_imzasi?: string } | null)?.kural_imzasi
+  if (onizlemeImzasi && onizlemeImzasi !== kuralImzasi(kurallar, kategoriler)) throw new KuralDegistiHatasi()
+  const taraflar = tarafHaritasi(kategoriler)
 
   const stagedRows = await fetchAll<{ payload: IrsaliyeRecord; diff_status: string }>((from, to) =>
     admin
@@ -313,7 +316,7 @@ export async function commitIrsaliyeBatch(
     if (!after) continue
     const ex = existingByFisNo.get(rec.fisNo)
     const effType = effectiveSaleType(after.sale_type_auto, after.sale_type_override)
-    const side = sideOf(effType)
+    const side = taraflar.get(effType) ?? null
     const existingInsts = ex ? (instByInvoice.get(ex.id) ?? []) : []
     const manual = existingInsts.filter((t) => t.source === 'manual')
     const effAmount = after.amount_eur_cents_override ?? after.amount_eur_cents

@@ -28,6 +28,7 @@ interface ExistingInvoice {
   amount_tl: number | null
   amount_eur_cents: number | null
   dovizli_raw: string
+  sale_type_auto: string
   sale_type_override: string | null
   amount_eur_cents_override: number | null
 }
@@ -61,7 +62,7 @@ export async function diffIrsaliye(
       admin
         .from('invoices')
         .select(
-          'id, fis_no, invoice_date, belge_no_raw, turu_raw, odeme_plani_raw, f_flag_raw, amount_tl, amount_eur_cents, dovizli_raw, sale_type_override, amount_eur_cents_override',
+          'id, fis_no, invoice_date, belge_no_raw, turu_raw, odeme_plani_raw, f_flag_raw, amount_tl, amount_eur_cents, dovizli_raw, sale_type_auto, sale_type_override, amount_eur_cents_override',
         )
         .in('fis_no', chunk)
         .order('id')

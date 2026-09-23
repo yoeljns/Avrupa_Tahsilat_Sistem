@@ -5,6 +5,7 @@ import StatCard from '@/components/StatCard'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { eur, trDateTime } from '@/lib/format'
 import { panoOzeti, type PanoOzeti } from '@/lib/queries'
+import { renkOf } from '@/lib/renkler'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -57,6 +58,16 @@ export default async function DashboardPage() {
   const reviewCount = ozet.inceleme?.adet ?? 0
   const reviewSum = ozet.inceleme?.tutar ?? 0
   const sonGuncelleme = (ozet.kosu?.stats?.son_firma_guncelleme as string | undefined) ?? ozet.kosu?.finished_at ?? ozet.kosu?.started_at
+  // Kategoriler yönetim panelinden: "Konsinye açık borç" hangi kategorilerin toplamı, panoda ayrı kartı olanlar
+  const kategoriler = ozet.kategoriler ?? []
+  const adlar = (taraf: 'PESIN' | 'VADELI', varsayilan: string) =>
+    kategoriler.length === 0
+      ? varsayilan
+      : kategoriler
+          .filter((k) => k.taraf === taraf && (k.aktif || k.acik > 0))
+          .map((k) => k.ad)
+          .join(' + ') || varsayilan
+  const kartlar = kategoriler.filter((k) => k.panoda_kart)
 
   return (
     <div>
@@ -84,8 +95,8 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Konsinye Açık Borç" value={eur(b?.vadeli_acik ?? 0)} sub="Konsinye + Konsinye Peşin" />
-        <StatCard title="Peşin Açık Borç" value={eur(b?.pesin_acik ?? 0)} />
+        <StatCard title="Konsinye Açık Borç" value={eur(b?.vadeli_acik ?? 0)} sub={adlar('VADELI', 'Konsinye + Konsinye Peşin')} />
+        <StatCard title="Peşin Açık Borç" value={eur(b?.pesin_acik ?? 0)} sub={adlar('PESIN', 'Peşin') !== 'Peşin' ? adlar('PESIN', 'Peşin') : undefined} />
         <StatCard
           title="Vadesi Geçmiş (Konsinye)"
           value={eur(v?.gecikmis ?? 0)}
@@ -111,6 +122,35 @@ export default async function DashboardPage() {
           </Link>
         )}
       </div>
+
+      {kartlar.length > 0 && (
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {kartlar.map((k) => {
+            const renk = renkOf(k.renk)
+            return (
+              <Link
+                key={k.kod}
+                href={`${k.taraf === 'PESIN' ? '/pesin' : '/konsinye'}?kategori=${encodeURIComponent(k.kod)}`}
+                className={'block rounded-2xl border-l-4 bg-white p-5 shadow-sm hover:bg-slate-50 ' + renk.kenar}
+              >
+                <p className="flex items-center gap-2 text-xs font-medium tracking-wide text-slate-500 uppercase">
+                  <span className={'h-2 w-2 rounded-full ' + renk.nokta} aria-hidden="true" />
+                  {k.ad} Açık Borç
+                </p>
+                <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900">{eur(k.acik)}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {k.gecikmis > 0 ? (
+                    <>
+                      Vadesi geçmiş: <span className="tabular-nums text-red-600">{eur(k.gecikmis)}</span> ·{' '}
+                    </>
+                  ) : null}
+                  {k.firma} firma
+                </p>
+              </Link>
+            )
+          })}
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Link href="/konsinye" className="rounded-2xl bg-white p-5 shadow-sm hover:bg-blue-50/40">

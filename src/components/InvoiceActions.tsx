@@ -2,11 +2,17 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Ban, Pencil, Plus, Undo2, X } from 'lucide-react'
+import Button from '@/components/ui/Button'
+import { Field, Input, Select } from '@/components/ui/Field'
+import Modal from '@/components/ui/Modal'
+import { useToast } from '@/components/ui/Toast'
 import { formatCents } from '@/lib/engine/money'
+import { DAVRANISLAR, SINIFSIZ_KOD, atanabilirKategoriler, davranisOf, kategoriBul, type KategoriMeta } from '@/lib/kategoriMeta'
 
-// Tahsilat Yöneticisi'nin irsaliye düzenleme modalı.
-// Yapılan her değişiklik sunucuda denetim kaydına işlenir ve mutabakat
-// otomatik yeniden hesaplanır.
+// Tahsilat Yöneticisi'nin irsaliye düzenleme penceresi.
+// Yapılan her değişiklik sunucuda denetim kaydına işlenir ve ilgili firma
+// yeniden hesaplanır.
 
 interface InstallmentDraft {
   dueDate: string
@@ -26,6 +32,8 @@ interface InvoiceActionsProps {
     planOverride?: string | null
     installments: Array<{ dueDate: string; amountCents: number; source: string }>
   }
+  /** Satış kategorileri (yönetim panelinden); yoksa varsayılanlar */
+  kategoriler?: readonly KategoriMeta[]
 }
 
 function trTarih(iso: string): string {
@@ -33,14 +41,9 @@ function trTarih(iso: string): string {
   return y && m && d ? `${d}.${m}.${y}` : iso
 }
 
-const TYPE_OPTIONS = [
-  { value: 'PESIN', label: 'Peşin' },
-  { value: 'KONSINYE', label: 'Konsinye' },
-  { value: 'KONSINYE_PESIN', label: 'Konsinye Peşin' },
-]
-
-export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
+export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsProps) {
   const router = useRouter()
+  const toast = useToast()
   const etkinPlan = invoice.planOverride ?? invoice.odemePlaniRaw
   const elleTaksit = invoice.installments.some((t) => t.source === 'manual')
   const [open, setOpen] = useState(false)
@@ -56,6 +59,10 @@ export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
     invoice.installments.map((t) => ({ dueDate: t.dueDate, amountEur: formatCents(t.amountCents) })),
   )
   const [cancelMode, setCancelMode] = useState(false)
+
+  const secenekler = atanabilirKategoriler(kategoriler, invoice.saleType)
+  const secili = kategoriBul(kategoriler, saleType)
+  const hesapDisi = saleType === SINIFSIZ_KOD || (!!secili && secili.taraf === null)
 
   function close() {
     setOpen(false)
@@ -96,13 +103,18 @@ export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
     if (reason.trim()) patch.reason = reason.trim()
 
     const hasPatch = Object.keys(patch).some((k) => k !== 'reason')
+    const taksitDuzenle = editInstallments && !hesapDisi
+    if (!hasPatch && !taksitDuzenle) {
+      setError('Değişiklik yapmadınız.')
+      return
+    }
     if (hasPatch) {
       const ok = await send(`/api/invoices/${invoice.id}`, 'PATCH', patch)
       if (!ok) return
     }
 
-    // 2) Manuel taksitler
-    if (editInstallments) {
+    // 2) Elle taksitler
+    if (taksitDuzenle) {
       const ok = await send(`/api/invoices/${invoice.id}/installments`, 'PUT', {
         installments: drafts,
         reason: reason.trim() || undefined,
@@ -110,11 +122,8 @@ export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
       if (!ok) return
     }
 
-    if (!hasPatch && !editInstallments) {
-      setError('Değişiklik yapmadınız.')
-      return
-    }
     close()
+    toast(`${invoice.fisNo} kaydedildi; firma yeniden hesaplandı.`)
     router.refresh()
   }
 
@@ -129,6 +138,7 @@ export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
     })
     if (!ok) return
     close()
+    toast(undo ? `${invoice.fisNo} iptali geri alındı.` : `${invoice.fisNo} iptal edildi.`)
     router.refresh()
   }
 
@@ -138,191 +148,173 @@ export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-      >
+      <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" aria-hidden="true" />} onClick={() => setOpen(true)}>
         Düzenle
-      </button>
+      </Button>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 text-left" onClick={close}>
-          <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-base font-bold text-slate-900">İrsaliye Düzenle — {invoice.fisNo}</h3>
+      <Modal
+        acik={open}
+        onKapat={close}
+        kapatilamaz={busy}
+        baslik={cancelMode ? (invoice.isCancelled ? `İptali geri al — ${invoice.fisNo}` : `İrsaliyeyi iptal et — ${invoice.fisNo}`) : `İrsaliye düzenle — ${invoice.fisNo}`}
+        altBilgi={
+          cancelMode ? (
+            <>
+              <Button onClick={() => setCancelMode(false)} disabled={busy}>
+                Geri
+              </Button>
+              <Button variant="danger" onClick={() => doCancel(invoice.isCancelled)} loading={busy}>
+                {invoice.isCancelled ? 'İptali geri al' : 'İptal et'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                className="mr-auto"
+                icon={invoice.isCancelled ? <Undo2 className="h-4 w-4" aria-hidden="true" /> : <Ban className="h-4 w-4" aria-hidden="true" />}
+                onClick={() => setCancelMode(true)}
+                disabled={busy}
+              >
+                {invoice.isCancelled ? 'İptali geri al…' : 'İptal et…'}
+              </Button>
+              <Button onClick={close} disabled={busy}>
+                Vazgeç
+              </Button>
+              <Button variant="primary" onClick={save} loading={busy}>
+                Kaydet
+              </Button>
+            </>
+          )
+        }
+      >
+        {!cancelMode ? (
+          <div className="space-y-4">
+            <Field
+              label="Satış kategorisi"
+              hint={
+                secili && saleType !== SINIFSIZ_KOD
+                  ? `${DAVRANISLAR[davranisOf(secili.taraf)].ad} — ${DAVRANISLAR[davranisOf(secili.taraf)].sayfa ?? 'borç hesabına girmez'}`
+                  : 'Sınıflandırılmamış irsaliye borç hesabına girmez.'
+              }
+            >
+              <Select value={saleType} onChange={(e) => setSaleType(e.target.value)}>
+                {invoice.saleType === SINIFSIZ_KOD && <option value={SINIFSIZ_KOD}>Sınıflandırılmadı</option>}
+                {secenekler.map((o) => (
+                  <option key={o.kod} value={o.kod}>
+                    {o.ad}
+                    {invoice.suggested === o.kod ? ' (önerilen)' : ''}
+                    {o.aktif ? '' : ' (pasif)'}
+                  </option>
+                ))}
+              </Select>
+            </Field>
 
-            {!cancelMode ? (
-              <div className="mt-4 space-y-4">
+            <Field label="Tutar (EUR)">
+              <Input value={amountEur} onChange={(e) => setAmountEur(e.target.value)} placeholder="51.414,86" className="tabular-nums" inputMode="decimal" />
+            </Field>
+
+            <Field
+              label={
+                <>
+                  Vade planı <span className="font-normal text-slate-400">(boş bırakılırsa değişmez)</span>
+                </>
+              }
+              hint={
+                <>
+                  Biçimler: <code>05.03.2026</code> · <code>05/3-4-5</code> (aylar) · <code>05/ 4--8--12</code> (aralık) · <code>05/ 11-12-1</code> (yıl geçişi) ·{' '}
+                  <code>NAKİT</code>
+                  {elleTaksit && ' — Yeni plan girerseniz elle girilen taksitler bu plana göre yeniden kurulur.'}
+                </>
+              }
+            >
+              <div className="mb-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">Satış Tipi</label>
-                  <select
-                    value={saleType}
-                    onChange={(e) => setSaleType(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    {invoice.saleType === 'OTHER' && <option value="OTHER">Sınıflandırılmadı</option>}
-                    {TYPE_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                        {invoice.suggested === o.value ? ' (önerilen)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                  Şu anki plan: <strong>{etkinPlan || '— (tarih girilmedi)'}</strong>
+                  {invoice.planOverride != null && <span className="ml-1 text-blue-700">(düzenlenmiş)</span>}
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">Tutar (EUR)</label>
-                  <input
-                    value={amountEur}
-                    onChange={(e) => setAmountEur(e.target.value)}
-                    placeholder="51.414,86"
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">
-                    Vade Planı <span className="font-normal text-slate-400">(boş bırakılırsa değişmez)</span>
-                  </label>
-                  <div className="mt-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    <div>
-                      Şu anki plan: <strong>{etkinPlan || '— (tarih girilmedi)'}</strong>
-                      {invoice.planOverride != null && <span className="ml-1 text-blue-700">(düzenlenmiş)</span>}
-                    </div>
-                    {invoice.installments.length > 0 && (
-                      <div className="mt-0.5">
-                        Mevcut vadeler: {invoice.installments.map((t) => trTarih(t.dueDate)).join(' · ')}
-                        {elleTaksit && <span className="ml-1 text-blue-700">(elle girilmiş)</span>}
-                      </div>
-                    )}
-                  </div>
-                  <input
-                    value={plan}
-                    onChange={(e) => setPlan(e.target.value)}
-                    placeholder="örn: 05/3-4-5 veya 05.03.2026"
-                    className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                  <p className="mt-1 text-xs text-slate-400">
-                    Biçimler: <code>05.03.2026</code> · <code>05/3-4-5</code> (aylar) · <code>05/ 4--8--12</code> (aralık) ·{' '}
-                    <code>05/ 11-12-1</code> (yıl geçişi) · <code>NAKİT</code>
-                    {elleTaksit && ' — Yeni plan girerseniz elle girilen taksitler bu plana göre yeniden kurulur.'}
-                  </p>
-                </div>
-
-                <div>
-                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={editInstallments}
-                      onChange={(e) => setEditInstallments(e.target.checked)}
-                    />
-                    Taksitleri elle düzenle (tutarlar toplamı irsaliye tutarına eşit olmalı)
-                  </label>
-                  {editInstallments && (
-                    <div className="mt-2 space-y-2">
-                      {drafts.map((d, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <input
-                            type="date"
-                            value={d.dueDate}
-                            onChange={(e) => setDraft(i, 'dueDate', e.target.value)}
-                            className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                          />
-                          <input
-                            value={d.amountEur}
-                            onChange={(e) => setDraft(i, 'amountEur', e.target.value)}
-                            className="w-32 rounded-lg border border-slate-300 px-2 py-1.5 text-sm tabular-nums"
-                          />
-                          <button
-                            onClick={() => setDrafts((rows) => rows.filter((_, idx) => idx !== i))}
-                            className="text-sm text-red-500 hover:text-red-700"
-                            title="Taksiti sil"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                      <button
-                        onClick={() => setDrafts((rows) => [...rows, { dueDate: '', amountEur: '0,00' }])}
-                        className="text-sm font-medium text-blue-700 hover:underline"
-                      >
-                        + Taksit ekle
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">
-                    Sebep <span className="font-normal text-slate-400">(denetim kaydına yazılır)</span>
-                  </label>
-                  <input
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </div>
-
-                {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                  <button
-                    onClick={() => setCancelMode(true)}
-                    className="text-sm font-medium text-red-600 hover:underline"
-                  >
-                    {invoice.isCancelled ? 'İptali geri al…' : 'İrsaliyeyi iptal et…'}
-                  </button>
-                  <div className="flex gap-2">
-                    <button onClick={close} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">
-                      Vazgeç
-                    </button>
-                    <button
-                      onClick={save}
-                      disabled={busy}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {busy ? 'Kaydediliyor…' : 'Kaydet'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 space-y-4">
-                <p className="text-sm text-slate-600">
-                  {invoice.isCancelled
-                    ? 'İptal geri alınacak; irsaliye tekrar borç hesabına girecek.'
-                    : 'İrsaliye iptal edilecek; borç hesabından tamamen çıkacak. Bu işlem denetim kaydına işlenir.'}
-                </p>
-                {!invoice.isCancelled && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700">Sebep (zorunlu)</label>
-                    <input
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    />
+                {invoice.installments.length > 0 && (
+                  <div className="mt-0.5">
+                    Mevcut vadeler: {invoice.installments.map((t) => trTarih(t.dueDate)).join(' · ')}
+                    {elleTaksit && <span className="ml-1 text-blue-700">(elle girilmiş)</span>}
                   </div>
                 )}
-                {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => setCancelMode(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">
-                    Geri
-                  </button>
-                  <button
-                    onClick={() => doCancel(invoice.isCancelled)}
-                    disabled={busy}
-                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-                  >
-                    {busy ? 'İşleniyor…' : invoice.isCancelled ? 'İptali Geri Al' : 'İptal Et'}
-                  </button>
-                </div>
               </div>
-            )}
+              <Input value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="örn: 05/3-4-5 veya 05.03.2026" />
+            </Field>
+
+            <div>
+              <label className={'flex items-center gap-2 text-sm font-medium ' + (hesapDisi ? 'text-slate-400' : 'text-slate-700')}>
+                <input
+                  type="checkbox"
+                  checked={editInstallments && !hesapDisi}
+                  disabled={hesapDisi}
+                  onChange={(e) => setEditInstallments(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                Taksitleri elle düzenle (tutarlar toplamı irsaliye tutarına eşit olmalı)
+              </label>
+              {hesapDisi && <p className="mt-1 text-xs text-slate-500">Seçili kategori borç hesabına girmediği için taksit girilmez.</p>}
+              {editInstallments && !hesapDisi && (
+                <div className="mt-2 space-y-2">
+                  {drafts.map((d, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input type="date" boyut="sm" tam={false} value={d.dueDate} onChange={(e) => setDraft(i, 'dueDate', e.target.value)} aria-label={`${i + 1}. taksit tarihi`} />
+                      <Input
+                        boyut="sm"
+                        tam={false}
+                        value={d.amountEur}
+                        onChange={(e) => setDraft(i, 'amountEur', e.target.value)}
+                        className="w-32 tabular-nums"
+                        inputMode="decimal"
+                        aria-label={`${i + 1}. taksit tutarı`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setDrafts((rows) => rows.filter((_, idx) => idx !== i))}
+                        className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-700"
+                        title="Taksiti sil"
+                        aria-label={`${i + 1}. taksiti sil`}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                  <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" aria-hidden="true" />} onClick={() => setDrafts((rows) => [...rows, { dueDate: '', amountEur: '0,00' }])}>
+                    Taksit ekle
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <Field
+              label={
+                <>
+                  Sebep <span className="font-normal text-slate-400">(denetim kaydına yazılır)</span>
+                </>
+              }
+            >
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Field>
+
+            {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              {invoice.isCancelled
+                ? 'İptal geri alınacak; irsaliye tekrar borç hesabına girecek.'
+                : 'İrsaliye iptal edilecek; borç hesabından tamamen çıkacak. Bu işlem denetim kaydına işlenir.'}
+            </p>
+            {!invoice.isCancelled && (
+              <Field label="Sebep (zorunlu)">
+                <Input value={reason} onChange={(e) => setReason(e.target.value)} data-autofocus />
+              </Field>
+            )}
+            {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          </div>
+        )}
+      </Modal>
     </>
   )
 }

@@ -1,13 +1,14 @@
 # Avrupa Tahsilat Sistemi
 
 Boya/hırdavat toptan satışı için **alacak ve tahsilat takip sistemi**. Satış irsaliyelerini
-(Peşin / Konsinye / Konsinye Peşin) ve gelen ödemeleri Excel'den okur, borçları firma ve
-vade tarihi bazında takvim görünümünde izler, ödemeleri FIFO kuralıyla borçlardan düşer.
+(Peşin / Konsinye / Konsinye Peşin ve panelden eklenen diğer satış kategorileri) ve gelen
+ödemeleri Excel'den okur, borçları firma ve vade tarihi bazında takvim görünümünde izler,
+ödemeleri FIFO kuralıyla borçlardan düşer.
 
 ## Ne yapar?
 
-- **İrsaliye içe aktarma (.xls):** Belge No'dan satış tipini, Ödeme Planı'ndan vade tarihlerini
-  otomatik çözer. Desteklenen plan biçimleri: `NAKİT` · `05.03.2026` · `05/3-4-5` (aylar listesi) ·
+- **İrsaliye içe aktarma (.xls):** Satış kategorisini **tanıma kurallarıyla** (Belge No / Türü
+  kolonu), Ödeme Planı'ndan vade tarihlerini otomatik çözer. Desteklenen plan biçimleri: `NAKİT` · `05.03.2026` · `05/3-4-5` (aylar listesi) ·
   `05/ 4--8--12` (**çift çizgi = aralık**: 4'ten 12'ye tüm aylar) · boş (vade = irsaliye tarihi,
   "tarih girilmedi" işaretiyle). Çok aylı planlarda tutar taksitlere **eşit bölünür**, küsurat son taksite eklenir.
 - **31/12 kuralı:** 31 Aralık tarihli irsaliyeler içe aktarılır ama borç hesabına **hiç katılmaz**.
@@ -33,6 +34,14 @@ vade tarihi bazında takvim görünümünde izler, ödemeleri FIFO kuralıyla bo
   aktarma, Excel raporları) · `pazarlamaci` (yalnız kendi firmalarının borçlarını görür).
 - **Takip dışı firmalar:** Tanımlı kodların (42 adet kurulumla gelir) verileri hesaplara katılmaz;
   liste panelden yönetilir. Eşleşme Türkçe karakter duyarsızdır (`54 C03` ↔ `54 Ç03`).
+- **Satış kategorileri ve tanıma kuralları (Yönetim paneli):** Peşin / Konsinye / Konsinye Peşin
+  dışında yeni kategoriler oluşturulur; her kategorinin **davranışı** seçilir — *Peşin gibi*
+  (Peşin sayfası), *Vadeli gibi* (Konsinye sayfası) ya da *Hesaba katılmaz* (yalnız bilgi).
+  Ad, renk, sayfadaki süzgeç düğmesi ve panodaki kart ayarlanır. İrsaliyeler kategorilere
+  sıralı **tanıma kurallarıyla** (Belge No / Türü: içerir, ile başlar, ile biter, tam olarak,
+  düzenli ifade) atanır; kural kaydı önce **etkisini gösterir**, onaydan sonra mevcut irsaliyeler de
+  yeniden sınıflandırılır. Elle seçilmiş kategoriler asla değişmez. Ayarları yalnız **Yönetici**
+  değiştirir; Tahsilat Yöneticisi görür.
 
 ---
 
@@ -65,12 +74,19 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 1. [supabase.com/dashboard](https://supabase.com/dashboard) → projeniz → sol menüden **SQL Editor**.
 2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: **`supabase/migrations/0001_init.sql`** →
    **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** → **`0004_hiz.sql`** →
-   **`0005_hiz_rls.sql`** → **`0006_takvim.sql`** (her birinin içeriğini yapıştırıp **Run**).
+   **`0005_hiz_rls.sql`** → **`0006_takvim.sql`** → **`0007_kategoriler.sql`** (her birinin içeriğini
+   yapıştırıp **Run**).
 3. Hepsinde "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
 
 > **Sistemi daha önce kurduysanız (güncelleme):** yalnız henüz çalıştırmadığınız migration
 > dosyalarını sırayla çalıştırın, ardından uygulamada **Pano → Yeniden Hesapla**'ya basın.
 > Dosyaları yeniden yüklemeniz gerekmez.
+
+> **Sürüm geri alma notu (0007):** Migration'lar geri uyumludur — eski uygulama sürümü yeni
+> şemayla çalışmaya devam eder. **Ancak** panelden yeni bir satış kategorisi oluşturup
+> irsaliyelere atadıktan sonra 0007 öncesi bir uygulama sürümüne dönmek güvenli değildir
+> (eski kod yalnız Peşin / Konsinye / Konsinye Peşin'i tanır). Geri dönmeniz gerekirse önce
+> yeni kategorilerdeki irsaliyeleri bu üç kategoriden birine taşıyın.
 
 > **Bölge:** `vercel.json` uygulama sunucusunu Frankfurt'a (`fra1`) sabitler; Supabase
 > projesi de Frankfurt'tadır (`eu-central-1`). İkisi farklı kıtalarda olursa her sorgu
@@ -113,14 +129,16 @@ yeniden hesaplanır.
 | `/setup` "Kurulum daha önce tamamlanmış" diyor | Normal — kullanıcılar zaten oluşturulmuş. Yeni kullanıcı/şifre işlemleri **Yönetim → Kullanıcılar**'dan yapılır. |
 | Pazarlamacı hiç firma göremiyor | Bayi listesindeki `pazarlamaci_email` ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayi Listesi**'nden dosyayı güncelleyin. |
 | İçe aktarma "yetkiniz yok" diyor | İçe aktarmayı yalnız Yönetici ve Tahsilat Yöneticisi yapabilir. |
-| Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı tazeleyebilirsiniz. |
+| Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı tazeleyebilirsiniz. **Yönetim → Genel Bakış** veri sağlığını tek ekranda gösterir. |
+| Çok sayıda irsaliye "Sınıflandırılmadı" | **Yönetim → Tanıma Kuralları**: sağdaki "Tanınmayan Belge No kalıpları"na tıklayın, deneme kutusunda sonucu görün, uygun kuralı ekleyip **Etkiyi önizle → Kaydet ve uygula**. |
+| İçe aktarma "kurallar önizlemeden sonra değişti" diyor | Önizleme ile onay arasında tanıma kuralları değişmiş. Dosyayı yeniden önizleyip onaylayın. |
 | Sayfalar yavaş açılıyor | `https://<adresiniz>/api/saglik` açın: `sunucu_bolgesi` `fra1` ve `en_hizli_tur_ms` 60'ın altında olmalı (normalde ~35). Değilse Vercel'de son dağıtımın üretimde olduğunu ve `vercel.json`'daki bölgeyi kontrol edin. |
 
 ## Geliştiriciler için
 
 ```bash
 npm install          # bağımlılıklar
-npm test             # 115 birim testi (motor + parserlar)
+npm test             # birim testleri (motor, parserlar, kategoriler, kurallar)
 npm run dev          # geliştirme sunucusu
 npm run build        # üretim derlemesi
 ```
@@ -131,5 +149,6 @@ npm run build        # üretim derlemesi
 - Para hesapları EUR **tam kuruş (cent) tamsayısıyla** yapılır; TL tutarlar bilgi amaçlıdır.
 - Mutabakat sürümlüdür: her hesap yeni `recon_run` altına yazılır, sonra işaretçi çevrilir —
   yarım sonuç asla görünmez. Motor deterministiktir (aynı veri → aynı tahsis).
-- Gerçek dosyalarla entegrasyon testleri (yerel PostgreSQL gerektirir):
-  `PG_TEST_SOCKET=... IRSALIYE_FILE=... ODEMELER_FILE=... BAYILER_FILE=... npm test`
+- Veritabanı entegrasyon testleri (yerel PostgreSQL; tüm migration'lar sırayla kurulur — RLS,
+  sayfa fonksiyonları, kategori/kural akışları): `PG_TEST_SOCKET=/tmp/pgs npm test`
+- Gerçek dosyalarla entegrasyon testleri: `PG_TEST_SOCKET=... IRSALIYE_FILE=... ODEMELER_FILE=... BAYILER_FILE=... npm test`

@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { apiSession } from '@/lib/auth'
 import { isValidISODate } from '@/lib/engine/dates'
 import { parseEurToCents } from '@/lib/engine/money'
-import { auditInvoiceChange, effectiveAmount, effectiveType, loadInvoiceForOps, sideOfType } from '@/lib/invoiceOps'
+import { auditInvoiceChange, effectiveAmount, effectiveType, loadInvoiceForOps, sideOfType, tarafHaritasiYukle } from '@/lib/invoiceOps'
 import { recomputeFirms } from '@/lib/recompute'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 
@@ -40,9 +40,12 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   const inv = await loadInvoiceForOps(admin, id)
   if (!inv) return NextResponse.json({ error: 'İrsaliye bulunamadı.' }, { status: 404 })
 
-  const side = sideOfType(effectiveType(inv))
+  const side = sideOfType(effectiveType(inv), await tarafHaritasiYukle(admin))
   if (side === null) {
-    return NextResponse.json({ error: 'Önce irsaliyenin satış tipini belirleyin (sınıflandırma bekliyor).' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Bu irsaliye borç sayılmıyor (sınıflandırma bekliyor ya da kategorisi "hesaba katılmaz"); elle taksit girilemez.' },
+      { status: 400 },
+    )
   }
   const amount = effectiveAmount(inv)
   if (amount === null) {

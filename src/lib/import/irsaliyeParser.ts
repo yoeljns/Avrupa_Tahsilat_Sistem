@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
-import { classifySaleType } from '@/lib/engine/classify'
+import { incelemeNedenleri } from '@/lib/engine/inceleme'
+import { VARSAYILAN_KURALLAR, classifyWithRules, type Kural } from '@/lib/engine/kurallar'
 import { excelSerialToISO, isDec31 } from '@/lib/engine/dates'
 import { parseEurToCents } from '@/lib/engine/money'
 import { normText, normalizeFirmCode } from '@/lib/engine/normalize'
@@ -65,7 +66,16 @@ function cellNum(v: Cell): number | null {
   return null
 }
 
-export function parseIrsaliyeXls(buf: Buffer | ArrayBuffer): ParsedIrsaliye {
+/**
+ * `kurallar`: satış kategorisi tanıma kuralları (veritabanından); verilmezse
+ * varsayılan kurallar. `gecerliKodlar`: aktif kategori kodları (pasif hedefli
+ * kurallar atlanır).
+ */
+export function parseIrsaliyeXls(
+  buf: Buffer | ArrayBuffer,
+  kurallar: readonly Kural[] = VARSAYILAN_KURALLAR,
+  gecerliKodlar?: ReadonlySet<string>,
+): ParsedIrsaliye {
   const wb = XLSX.read(buf, { type: buf instanceof ArrayBuffer ? 'array' : 'buffer', raw: true })
   const sheetName = wb.SheetNames.includes('Sayfa1') ? 'Sayfa1' : wb.SheetNames[0]
   if (!sheetName) return { records: [], invalids: [], warnings: ['Dosyada sayfa bulunamadı.'] }
@@ -116,16 +126,12 @@ export function parseIrsaliyeXls(buf: Buffer | ArrayBuffer): ParsedIrsaliye {
     const amountTl = cellNum(row[11])
     const amountEurCents = parseEurToCents(dovizliRaw)
 
-    const classify = classifySaleType(belgeNoRaw, turuRaw)
+    const classify = classifyWithRules(belgeNoRaw, turuRaw, kurallar, gecerliKodlar)
     const plan = parseOdemePlani(odemePlaniRaw, invoiceDateISO)
     const is3112 = isDec31(invoiceDateISO)
     const fisnoNonstandard = !/^AVI\d+$/.test(fisNo)
 
-    const reviewReasons: string[] = []
-    if (classify.needsReview) reviewReasons.push(classify.reason)
-    if (plan.status === 'unparsed') reviewReasons.push(plan.note ?? 'Ödeme planı çözülemedi')
-    if (plan.supheli && !is3112) reviewReasons.push(plan.note ?? 'Vade irsaliye tarihinden çok önce')
-    if (amountEurCents === null && !is3112) reviewReasons.push('EURO tutarı okunamadı')
+    const reviewReasons = incelemeNedenleri({ siniflandirma: classify, plan, amountEurCents, is3112 })
 
     records.push({
       rowIndex: r + 1,

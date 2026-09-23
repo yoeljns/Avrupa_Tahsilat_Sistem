@@ -1,25 +1,25 @@
 import { redirect } from 'next/navigation'
+import { TriangleAlert } from 'lucide-react'
 import ResetDataPanel from '@/components/ResetDataPanel'
-import { requireRole } from '@/lib/auth'
+import PageHeader from '@/components/ui/PageHeader'
+import { SAHIP_EPOSTA, isSahip, requireRole } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-// Veri sıfırlama — YALNIZ yy@avrupagroup.com erişebilir.
+// Veri sıfırlama — YALNIZ sistemin sahibi (SAHIP_EPOSTA) erişebilir.
 
 export default async function SifirlamaPage() {
   const session = await requireRole(['yonetici'])
-  if (session.email.toLowerCase() !== 'yy@avrupagroup.com') redirect('/yonetim')
+  if (!isSahip(session.email)) redirect('/yonetim')
 
   return (
-    <div>
-      <h1 className="text-lg font-bold text-slate-900">Veri Sıfırlama</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Sistemi temiz bir başlangıca döndürür. Bu sayfayı yalnız siz (yy@avrupagroup.com) görebilir ve
-        çalıştırabilirsiniz.
-      </p>
-      <div className="mt-4">
-        <ResetDataPanel />
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        icon={<TriangleAlert className="h-5 w-5" />}
+        title="Veri Sıfırlama"
+        description={`Sistemi temiz bir başlangıca döndürür. Bu sayfayı yalnız siz (${SAHIP_EPOSTA}) görebilir ve çalıştırabilirsiniz.`}
+      />
+      <ResetDataPanel />
     </div>
   )
 }
