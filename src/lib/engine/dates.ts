@@ -49,3 +49,13 @@ export function compareISO(a: string, b: string): number {
 export function isDec31(iso: string | null): boolean {
   return !!iso && iso.slice(5) === '12-31'
 }
+
+/** 'YYYY-AA-GG' gerçek bir takvim günü mü? ('2026-02-30' → false) */
+export function isValidISODate(iso: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!m) return false
+  const y = parseInt(m[1], 10)
+  const mo = parseInt(m[2], 10)
+  const d = parseInt(m[3], 10)
+  return mo >= 1 && mo <= 12 && d >= 1 && d <= daysInMonth(y, mo)
+}

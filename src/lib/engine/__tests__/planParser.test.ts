@@ -139,3 +139,47 @@ describe('parseOdemePlani — tarih anlık görüntüleri', () => {
     expect(parseOdemePlani('05/ 4-4-5', INV).dueDates).toEqual(['2026-04-05', '2026-05-05'])
   })
 })
+
+describe('parseOdemePlani — yıl geçişi (Ekim–Aralık irsaliyeleri)', () => {
+  it("sıra geriye dönünce yıl atlar: Ekim irsaliyesi '05/ 11-12-1-2'", () => {
+    const r = parseOdemePlani('05/ 11-12-1-2', '2026-10-20')
+    expect(r.status).toBe('ok')
+    expect(r.dueDates).toEqual(['2026-11-05', '2026-12-05', '2027-01-05', '2027-02-05'])
+    expect(r.supheli).toBeFalsy()
+  })
+
+  it("yıl sonunu saran aralık: '05/ 11--2' = 11, 12, 1, 2", () => {
+    expect(parseOdemePlani('05/ 11--2', '2026-10-20').dueDates).toEqual([
+      '2026-11-05',
+      '2026-12-05',
+      '2027-01-05',
+      '2027-02-05',
+    ])
+  })
+
+  it("ilk ay 6+ ay gerideyse plan ertesi yıla aittir: Kasım irsaliyesi '05/1-2-3'", () => {
+    expect(parseOdemePlani('05/1-2-3', '2026-11-15').dueDates).toEqual(['2027-01-05', '2027-02-05', '2027-03-05'])
+  })
+
+  it('aynı ay içinde günü geçmiş vade olduğu gibi kalır (veride yaygın)', () => {
+    const r = parseOdemePlani('05 / 4-5-6', '2026-04-08')
+    expect(r.dueDates).toEqual(['2026-04-05', '2026-05-05', '2026-06-05'])
+    expect(r.supheli).toBeFalsy()
+  })
+
+  it('mevcut veri kalıpları değişmez: Şubat irsaliyesi 05/ 4--8--12 aynı yıl', () => {
+    const r = parseOdemePlani('05/ 4--8--12', '2026-02-10')
+    expect(r.dueDates[0]).toBe('2026-04-05')
+    expect(r.dueDates[r.dueDates.length - 1]).toBe('2026-12-05')
+  })
+
+  it('irsaliyeden 30+ gün önceye düşen vade şüphelidir (incelemeye düşer)', () => {
+    const r = parseOdemePlani('05 / 5-6-7-8-9', '2026-08-13')
+    expect(r.status).toBe('ok')
+    expect(r.supheli).toBe(true)
+    expect(r.note).toContain('30 günden fazla önce')
+    // doğrudan tarih de aynı kurala tabidir
+    expect(parseOdemePlani('05.03.2026', '2026-06-08').supheli).toBe(true)
+    expect(parseOdemePlani('05.06.2026', '2026-06-08').supheli).toBeFalsy()
+  })
+})

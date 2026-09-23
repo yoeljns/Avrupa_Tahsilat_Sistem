@@ -1,6 +1,5 @@
 import ImportPanel from '@/components/ImportPanel'
 import { requireRole } from '@/lib/auth'
-import { fetchAll } from '@/lib/db'
 import { trDateTime } from '@/lib/format'
 import { createServerSupabase } from '@/lib/supabase/server'
 
@@ -27,13 +26,13 @@ export default async function IceAktarimPage() {
   await requireRole(['yonetici', 'tahsilat_yoneticisi'])
   const supabase = await createServerSupabase()
 
-  const batches = await fetchAll<BatchRow>((from, to) =>
-    supabase
-      .from('import_batches')
-      .select('id, kind, filename, uploaded_by, status, stats, created_at, committed_at')
-      .order('created_at', { ascending: false })
-      .range(from, to),
-  ).then((rows) => rows.slice(0, 20))
+  // Yalnız son 20 yükleme (tümünü çekip kesmek yerine)
+  const { data } = await supabase
+    .from('import_batches')
+    .select('id, kind, filename, uploaded_by, status, stats, created_at, committed_at')
+    .order('created_at', { ascending: false })
+    .range(0, 19)
+  const batches = (data ?? []) as BatchRow[]
 
   return (
     <div>

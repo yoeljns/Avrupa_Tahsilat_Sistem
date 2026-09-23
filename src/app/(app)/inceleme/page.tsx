@@ -1,47 +1,33 @@
 import Link from 'next/link'
 import ClearReviewButton from '@/components/ClearReviewButton'
+import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import ReviewClassifyTable, { type ReviewRow } from '@/components/ReviewClassifyTable'
 import { requireRole } from '@/lib/auth'
-import { fetchAll } from '@/lib/db'
 import { eur, trDate } from '@/lib/format'
+import { incelemeVerisi, type IncelemeIrsaliye, type IncelemeVerisi } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
 // İnceleme kuyruğu: içe aktarmanın kendi başına karar veremediği her şey
-// burada Tahsilat Yöneticisi onayı bekler.
-
-interface ReviewInvoice {
-  id: string
-  fis_no: string
-  firm_id: string
-  firm_code: string
-  firm_name: string
-  invoice_date: string
-  belge_no_raw: string
-  odeme_plani_raw: string
-  amount_eur_cents: number | null
-  sale_type: string
-  suggested_sale_type: string | null
-  classify_reason: string | null
-  plan_parse_status: string
-  plan_parse_note: string | null
-  is_31_12: boolean
-  is_cancelled: boolean
-  is_excluded_firm: boolean
-  excluded_override: boolean | null
-  fisno_nonstandard: boolean
-  needs_review: boolean
-  raw_changed_after_override: boolean
-}
+// burada Tahsilat Yöneticisi onayı bekler. Veriler TEK ağ turunda gelir.
 
 const TABS = [
   { key: 'siniflandirma', label: 'Sınıflandırma' },
   { key: 'plan', label: 'Plan Çözülemedi' },
+  { key: 'diger', label: 'Diğer Uyarılar' },
+  { key: 'iade', label: 'İadeler' },
   { key: 'cakisma', label: 'Çakışmalar' },
   { key: 'otuzbiraralik', label: '31/12 Hariçler' },
   { key: 'tarihsiz', label: 'Tarih Girilmedi' },
 ] as const
+
+/** 'Diğer' sekmesindeki kaydın neden incelemede olduğu */
+function uyariNedeni(i: IncelemeIrsaliye): string {
+  if (i.amount_eur_cents === null) return 'EURO tutarı okunamadı — tutar girin'
+  if (i.plan_parse_note) return i.plan_parse_note
+  return i.classify_reason ?? 'Kontrol bekliyor'
+}
 
 export default async function IncelemePage({ searchParams }: { searchParams: Promise<{ sekme?: string }> }) {
   await requireRole(['yonetici', 'tahsilat_yoneticisi'])
@@ -49,46 +35,38 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
   const params = await searchParams
   const tab = TABS.some((t) => t.key === params.sekme) ? params.sekme! : 'siniflandirma'
 
-  const invoicesRaw = await fetchAll<ReviewInvoice>((from, to) =>
-    supabase
-      .from('v_invoices_effective')
-      .select(
-        'id, fis_no, firm_id, firm_code, firm_name, invoice_date, belge_no_raw, odeme_plani_raw, amount_eur_cents, sale_type, suggested_sale_type, classify_reason, plan_parse_status, plan_parse_note, is_31_12, is_cancelled, is_excluded_firm, excluded_override, fisno_nonstandard, needs_review, raw_changed_after_override',
-      )
-      .or('needs_review.eq.true,is_31_12.eq.true,raw_changed_after_override.eq.true')
-      .order('invoice_date', { ascending: false })
-      .range(from, to),
-  )
+  let veri: IncelemeVerisi
+  try {
+    veri = await incelemeVerisi(supabase)
+  } catch (e) {
+    if (isMissingRelationError(e)) return <MigrationNeeded />
+    throw e
+  }
 
   // Takip dışı firmaların irsaliyeleri inceleme kuyruğuna GİRMEZ
-  const invoices = invoicesRaw.filter((i) => !(i.excluded_override ?? i.is_excluded_firm))
+  const invoices = veri.irsaliyeler.filter((i) => !(i.excluded_override ?? i.is_excluded_firm))
   const active = invoices.filter((i) => !i.is_cancelled)
-  const classification = active.filter((i) => i.sale_type === 'OTHER' && !i.is_31_12)
+  const classification = active.filter((i) => i.sale_type === 'OTHER' && !i.is_31_12 && !i.is_iade)
   const planIssues = active.filter((i) => i.plan_parse_status === 'unparsed' && i.sale_type !== 'OTHER' && !i.is_31_12)
   const conflicts = active.filter((i) => i.raw_changed_after_override)
-  const dec31 = invoices.filter((i) => i.is_31_12)
-
-  // Tarihsiz: açık taksitlerde no_date_flag
-  const noDateRows = await fetchAll<{
-    installment_id: string
-    firm_code: string
-    firm_name: string
-    fis_no: string
-    due_date: string
-    remaining_eur_cents: number
-    firm_id: string
-  }>((from, to) =>
-    supabase
-      .from('v_open_installments')
-      .select('installment_id, firm_id, firm_code, firm_name, fis_no, due_date, remaining_eur_cents')
-      .eq('no_date_flag', true)
-      .order('firm_code')
-      .range(from, to),
+  const iadeler = active.filter((i) => i.is_iade && !i.is_31_12)
+  const diger = active.filter(
+    (i) =>
+      i.needs_review &&
+      !i.is_31_12 &&
+      !i.is_iade &&
+      i.sale_type !== 'OTHER' &&
+      i.plan_parse_status !== 'unparsed' &&
+      !i.raw_changed_after_override,
   )
+  const dec31 = invoices.filter((i) => i.is_31_12)
+  const noDateRows = veri.tarihsiz
 
   const counts: Record<string, number> = {
     siniflandirma: classification.length,
     plan: planIssues.length,
+    diger: diger.length,
+    iade: iadeler.filter((i) => i.needs_review).length,
     cakisma: conflicts.length,
     otuzbiraralik: dec31.length,
     tarihsiz: noDateRows.length,
@@ -144,7 +122,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
               i.fis_no,
               `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
               trDate(i.invoice_date),
-              i.odeme_plani_raw,
+              i.plan_override_note ?? i.odeme_plani_raw,
               i.plan_parse_note ?? '',
               eur(i.amount_eur_cents),
               <Link key="l" href={`/firmalar/${i.firm_id}`} className="text-blue-700 hover:underline">
@@ -152,6 +130,61 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
               </Link>,
             ])}
           />
+        )}
+
+        {tab === 'diger' && (
+          <>
+            <p className="mb-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-600">
+              Hesaba dahil olan ama kontrol edilmesi gereken irsaliyeler (okunamayan tutar, irsaliye tarihinden çok önceye
+              düşen vade vb.). Gerekirse düzenleyin, sonra “Kontrol edildi” ile listeden çıkarın.
+            </p>
+            <SimpleTable
+              empty="Başka uyarı yok."
+              head={['Fiş No', 'Firma', 'Tarih', 'Plan', 'Neden', 'Tutar €', '']}
+              rows={diger.map((i) => [
+                i.fis_no,
+                `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
+                trDate(i.invoice_date),
+                i.plan_override_note ?? i.odeme_plani_raw,
+                uyariNedeni(i),
+                eur(i.amount_eur_cents),
+                <span key="a" className="inline-flex gap-2">
+                  <Link href={`/firmalar/${i.firm_id}`} className="text-blue-700 hover:underline">
+                    Düzenle →
+                  </Link>
+                  <ClearReviewButton invoiceId={i.id} />
+                </span>,
+              ])}
+            />
+          </>
+        )}
+
+        {tab === 'iade' && (
+          <>
+            <p className="mb-3 rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-800">
+              İade irsaliyeleri müşterinin borcunu artırmaz; bu yüzden <strong>borca eklenmez</strong>. İade tutarının
+              müşteriye alacak olarak yansıması gerekiyorsa ödeme kaydıyla işleyin. Bir iadeyi yine de borç saymak
+              isterseniz firma sayfasından satış tipini açıkça seçin.
+            </p>
+            <SimpleTable
+              empty="İade irsaliyesi yok."
+              head={['Fiş No', 'Firma', 'Tarih', 'Belge No', 'Tutar €', 'Durum', '']}
+              rows={iadeler.map((i) => [
+                i.fis_no,
+                `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
+                trDate(i.invoice_date),
+                i.belge_no_raw,
+                eur(i.amount_eur_cents),
+                i.is_allocatable ? 'Borçta (yönetici kararı)' : 'Borca eklenmedi',
+                <span key="a" className="inline-flex gap-2">
+                  <Link href={`/firmalar/${i.firm_id}`} className="text-blue-700 hover:underline">
+                    Firma →
+                  </Link>
+                  {i.needs_review && <ClearReviewButton invoiceId={i.id} />}
+                </span>,
+              ])}
+            />
+          </>
         )}
 
         {tab === 'cakisma' && (

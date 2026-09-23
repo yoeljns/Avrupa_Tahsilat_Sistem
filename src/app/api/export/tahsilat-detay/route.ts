@@ -54,6 +54,7 @@ export async function GET() {
       .from('payments')
       .select('id, islem_kodu, firm_id, sheet_side, islem_tarihi, doviz_eur_cents, allocatable, is_alc, is_kdv')
       .order('islem_tarihi')
+      .order('id') // eşit tarihlerde sayfa sınırında satır atlanmasın/tekrarlanmasın
       .range(from, to),
   )
 

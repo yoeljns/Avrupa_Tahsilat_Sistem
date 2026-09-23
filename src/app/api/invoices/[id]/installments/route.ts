@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiSession } from '@/lib/auth'
+import { isValidISODate } from '@/lib/engine/dates'
 import { parseEurToCents } from '@/lib/engine/money'
 import { auditInvoiceChange, effectiveAmount, effectiveType, loadInvoiceForOps, sideOfType } from '@/lib/invoiceOps'
-import { runRecompute } from '@/lib/recompute'
+import { recomputeFirms } from '@/lib/recompute'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -50,6 +51,9 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
 
   const rows: Array<{ dueDate: string; amountCents: number }> = []
   for (const t of parsed.data.installments) {
+    if (!isValidISODate(t.dueDate)) {
+      return NextResponse.json({ error: `Geçersiz tarih: ${t.dueDate}` }, { status: 400 })
+    }
     const cents = parseEurToCents(t.amountEur)
     if (cents === null || cents < 0) {
       return NextResponse.json({ error: `Taksit tutarı okunamadı: "${t.amountEur}"` }, { status: 400 })
@@ -70,24 +74,15 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     .eq('invoice_id', id)
     .order('seq')
 
-  const { error: delError } = await admin.from('installments').delete().eq('invoice_id', id)
-  if (delError) return NextResponse.json({ error: 'Eski taksitler silinemedi: ' + delError.message }, { status: 500 })
-
-  rows.sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))
-  const { error: insError } = await admin.from('installments').insert(
-    rows.map((r, i) => ({
-      invoice_id: id,
-      firm_id: inv.firm_id,
-      side,
-      seq: i + 1,
-      due_date: r.dueDate,
-      amount_eur_cents: r.amountCents,
-      source: 'manual',
-      no_date_flag: false,
-      remaining_eur_cents: null,
-    })),
-  )
-  if (insError) return NextResponse.json({ error: 'Taksitler yazılamadı: ' + insError.message }, { status: 500 })
+  // Silme + ekleme TEK işlemde: yarıda kalırsa eski taksitler yerinde kalır
+  rows.sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0))
+  const { error: yazError } = await admin.rpc('rpc_elle_taksit_yaz', {
+    p_invoice_id: id,
+    p_firm_id: inv.firm_id,
+    p_side: side,
+    p_taksitler: rows.map((r, i) => ({ seq: i + 1, due_date: r.dueDate, amount_eur_cents: r.amountCents })),
+  })
+  if (yazError) return NextResponse.json({ error: 'Taksitler yazılamadı: ' + yazError.message }, { status: 500 })
 
   await auditInvoiceChange(admin, session.email, inv, [
     {
@@ -99,6 +94,13 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     },
   ])
 
-  const recompute = await runRecompute(admin, 'edit', session.email)
-  return NextResponse.json({ ok: true, recompute: { runId: recompute.runId } })
+  try {
+    const recompute = await recomputeFirms(admin, [inv.firm_id], session.email)
+    return NextResponse.json({ ok: true, recompute })
+  } catch (e) {
+    return NextResponse.json(
+      { error: 'Taksitler kaydedildi ama hesap güncellenemedi: ' + (e instanceof Error ? e.message : String(e)) },
+      { status: 500 },
+    )
+  }
 }

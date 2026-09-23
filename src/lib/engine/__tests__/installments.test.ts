@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildInstallments } from '../installments'
+import { buildInstallments, scaleInstallmentAmounts } from '../installments'
 
 describe('buildInstallments — eşit bölme, küsurat son taksite', () => {
   it('60.000,00 € üç vadeye 20.000 + 20.000 + 20.000', () => {
@@ -22,5 +22,28 @@ describe('buildInstallments — eşit bölme, küsurat son taksite', () => {
 
   it('boş tarih listesi boş döner', () => {
     expect(buildInstallments(1000, [])).toEqual([])
+  })
+})
+
+describe('scaleInstallmentAmounts — elle taksitler yeni tutara oranlanır', () => {
+  it('oranlar korunur, küsurat son taksite, toplam birebir yeni tutar', () => {
+    const r = scaleInstallmentAmounts([7327103, 7327103, 7327102], 25000000)
+    expect(r.reduce((s, x) => s + x, 0)).toBe(25000000)
+    expect(r[0]).toBe(r[1])
+    expect(r).toEqual([8333333, 8333333, 8333334])
+  })
+
+  it('eşit olmayan dağılımda oran korunur (1:3)', () => {
+    expect(scaleInstallmentAmounts([100, 300], 1000)).toEqual([250, 750])
+  })
+
+  it('toplam değişmediyse aynen döner; eski toplam 0 ise eşit böler', () => {
+    expect(scaleInstallmentAmounts([500, 500], 1000)).toEqual([500, 500])
+    expect(scaleInstallmentAmounts([0, 0, 0], 1000)).toEqual([333, 333, 334])
+  })
+
+  it('çok büyük tutarlarda (milyonlarca €) kuruş kaybı olmaz', () => {
+    const r = scaleInstallmentAmounts([900_000_000_00, 100_000_000_00], 1_234_567_890_12)
+    expect(r.reduce((s, x) => s + x, 0)).toBe(1_234_567_890_12)
   })
 })

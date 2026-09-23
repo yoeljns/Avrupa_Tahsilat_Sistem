@@ -73,11 +73,13 @@ export async function POST(request: Request) {
   const stagedRows: Record<string, unknown>[] = []
   const updatedSamples: Array<{ key: string; fields: string[] }> = []
 
+  let yeniInceBicim = 0
   for (const rec of parsed.records) {
     const ex = existing.get(rec.islemKodu)
     const changed = ex ? odemeChangedFields(rec, ex) : []
     const status = !ex ? 'new' : changed.length > 0 ? 'updated' : 'unchanged'
     counts[status] = (counts[status] ?? 0) + 1
+    if (!ex && !rec.hasDetails) yeniInceBicim++
     if (status === 'updated' && updatedSamples.length < 20) updatedSamples.push({ key: rec.islemKodu, fields: changed })
     stagedRows.push({
       batch_id: batch.id,
@@ -122,6 +124,11 @@ export async function POST(request: Request) {
       ...(slimCount > 0
         ? [
             `Dosyada FİRMA KODU kolonu yok (ince biçim yedek): firmalar ad üzerinden eşleştirildi (${resolvedByName} yeni kayıt adla çözüldü${unresolved.length > 0 ? `, ${unresolved.length} tanesi eşleşmedi` : ''}). Mevcut kayıtların AÇIKLAMA/KDV/DURUM alanları korunacak.`,
+          ]
+        : []),
+      ...(yeniInceBicim > 0
+        ? [
+            `${yeniInceBicim} YENİ ödeme ince biçimden geliyor: dosyada KDV 1/5 ve KAYIT DURUMU bilgisi olmadığı için bunlar normal (tamamlanmış, KDV olmayan) ödeme sayılacak. İçlerinde KDV 1/5 ödemesi veya tamamlanmamış kayıt varsa tam biçimli yedeği yükleyin.`,
           ]
         : []),
       ...(alcCount > 0 ? [`${alcCount} ALC (alacak) kaydı bilgi olarak saklanacak, tahsise girmeyecek.`] : []),

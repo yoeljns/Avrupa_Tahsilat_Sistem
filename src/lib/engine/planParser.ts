@@ -11,7 +11,21 @@ import type { PlanParseResult } from './types'
 //   '05/ 4--8--12'     → 05. gün; 4'ten 12'ye TÜM aylar (ÇİFT çizgi = aralık doldurma)
 //   ''                 → vade = irsaliye tarihi ('tarih girilmedi' işaretiyle)
 //
-// Yıl daima irsaliye yılıdır; gün, ayın son gününe kıskaçlanır.
+// YIL KURALI: aylar irsaliye yılından başlar ve YAZILDIĞI SIRAYLA ilerler.
+//   * Sıra geriye dönerse yıl atlar: Ekim irsaliyesi '05/ 11-12-1-2' →
+//     05.11, 05.12, 05.01 (ERTESİ YIL), 05.02 (ertesi yıl). Aralık da sarar:
+//     '05/ 11--2' → 11, 12, 1, 2.
+//   * İlk ay, irsaliye ayından 6+ ay GERİDEYSE plan ertesi yıla aittir:
+//     Kasım irsaliyesi '05/1-2-3' → Ocak–Mart ertesi yıl.
+//   * Aynı ay içinde günü geçmiş vade (ör. 08.04 irsaliyesi, '05/4-5-6' →
+//     05.04) olduğu gibi kalır — veride yaygın ve bilinçli bir kullanım.
+// Gün, ayın son gününe kıskaçlanır (31 Şubat → 28/29 Şubat).
+//
+// Vadelerden biri irsaliye tarihinden 30 günden fazla ÖNCEYSE sonuç
+// 'supheli' işaretlenir; içe aktarma bunu inceleme kuyruğuna düşürür.
+
+/** Bu kadar gün geriye düşen vade şüphelidir (inceleme kuyruğu). */
+const SUPHELI_GERI_GUN = 30
 
 export function parseOdemePlani(raw: string | null | undefined, invoiceDateISO: string): PlanParseResult {
   const original = raw === null || raw === undefined ? '' : String(raw)
@@ -34,7 +48,7 @@ export function parseOdemePlani(raw: string | null | undefined, invoiceDateISO: 
     const month = parseInt(direct[2], 10)
     const year = parseInt(direct[3], 10)
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return { status: 'ok', dueDates: [isoFromYMDClamped(year, month, day)] }
+      return withSuspicion({ status: 'ok', dueDates: [isoFromYMDClamped(year, month, day)] }, invoiceDateISO)
     }
     return unparsed(original, invoiceDateISO)
   }
@@ -55,27 +69,54 @@ export function parseOdemePlani(raw: string | null | undefined, invoiceDateISO: 
     if (!months) return unparsed(original, invoiceDateISO)
 
     const invoiceYear = parseInt(invoiceDateISO.slice(0, 4), 10)
-    const dueDates = months.map((m) => isoFromYMDClamped(invoiceYear, m, day))
-    dueDates.sort(compareISO)
+    const invoiceMonth = parseInt(invoiceDateISO.slice(5, 7), 10)
+    // İlk ay irsaliye ayından 6+ ay gerideyse plan ertesi yıla aittir
+    const first = months[0].month
+    const baseYear = invoiceYear + (first < invoiceMonth && invoiceMonth - first >= 6 ? 1 : 0)
+    const dueDates = Array.from(
+      new Set(months.map((m) => isoFromYMDClamped(baseYear + m.yearOffset, m.month, day))),
+    ).sort(compareISO)
     const note = dueDates[0] < invoiceDateISO ? 'Bazı vadeler irsaliye tarihinden önce' : undefined
-    return { status: 'ok', dueDates, note }
+    return withSuspicion({ status: 'ok', dueDates, note }, invoiceDateISO)
   }
 
   return unparsed(original, invoiceDateISO)
 }
 
+/** Vadelerden biri irsaliye tarihinden 30+ gün önceyse şüpheli işaretle. */
+function withSuspicion(result: PlanParseResult, invoiceDateISO: string): PlanParseResult {
+  const esik = addDaysISO(invoiceDateISO, -SUPHELI_GERI_GUN)
+  if (result.dueDates.some((d) => d < esik)) {
+    return {
+      ...result,
+      supheli: true,
+      note: `Vade irsaliye tarihinden ${SUPHELI_GERI_GUN} günden fazla önce — plan yanlış yazılmış olabilir`,
+    }
+  }
+  return result
+}
+
+interface PlanAyi {
+  month: number
+  /** İrsaliye (taban) yılına eklenecek yıl: yazım sırasında ay geriye dönünce artar */
+  yearOffset: number
+}
+
 /**
- * Ay ifadesini çözer: '3-4-5' → [3,4,5]; '4--8--12' → [4..12].
+ * Ay ifadesini YAZILDIĞI SIRAYLA çözer: '3-4-5' → [3,4,5]; '4--8--12' → [4..12];
+ * '11-12-1-2' → [11, 12, 1(+1 yıl), 2(+1 yıl)]; '11--2' → aynı.
  * Çift (veya daha uzun) çizgi koşusu, iki sayı arasındaki tüm ayları doldurur.
  * Geçersiz yapıda null döner.
  */
-function parseMonthsExpr(expr: string): number[] | null {
+function parseMonthsExpr(expr: string): PlanAyi[] | null {
   const cleaned = expr.replace(/\s+/g, '')
   if (!cleaned) return null
   const tokens = cleaned.match(/\d+|-+/g)
   if (!tokens || tokens.join('') !== cleaned) return null
 
-  const months: number[] = []
+  const out: PlanAyi[] = []
+  let yearOffset = 0
+  let prev: number | null = null
   let expectNumber = true
   let pendingRange = false
 
@@ -84,13 +125,23 @@ function parseMonthsExpr(expr: string): number[] | null {
       if (!expectNumber) return null
       const m = parseInt(tok, 10)
       if (m < 1 || m > 12) return null
-      if (pendingRange) {
-        const prev = months[months.length - 1]
-        if (m <= prev) return null
-        for (let k = prev + 1; k <= m; k++) months.push(k)
+      if (pendingRange && prev !== null) {
+        if (m === prev) return null
+        // Yıl sonunu saran aralık ('11--2') en fazla 6 ay doldurabilir;
+        // '5--3' gibi ters yazım (11 ay!) yazım hatasıdır → çözülemedi
+        if (m < prev && 12 - prev + m > 6) return null
+        // prev'den m'ye kadar doldur; Aralık'tan Ocak'a geçişte yıl artar
+        let k: number = prev
+        while (k !== m) {
+          k = k === 12 ? 1 : k + 1
+          if (k === 1) yearOffset++
+          out.push({ month: k, yearOffset })
+        }
       } else {
-        months.push(m)
+        if (prev !== null && m < prev) yearOffset++
+        if (prev === null || m !== prev) out.push({ month: m, yearOffset })
       }
+      prev = m
       expectNumber = false
       pendingRange = false
     } else {
@@ -100,9 +151,7 @@ function parseMonthsExpr(expr: string): number[] | null {
     }
   }
   if (expectNumber) return null // ifade çizgiyle bitti
-
-  // Tekilleştir, sırala
-  return Array.from(new Set(months)).sort((a, b) => a - b)
+  return out
 }
 
 function unparsed(original: string, invoiceDateISO: string): PlanParseResult {

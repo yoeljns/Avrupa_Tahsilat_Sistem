@@ -3,167 +3,63 @@ import { notFound } from 'next/navigation'
 import InvoiceActions from '@/components/InvoiceActions'
 import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
-import { fetchAll } from '@/lib/db'
-import { SALE_TYPE_LABELS, eur, todayISO, trDate, trDateTime } from '@/lib/format'
-import { currentRunId, type BalanceRow } from '@/lib/queries'
+import { SALE_TYPE_LABELS, eur, todayISO, trDate } from '@/lib/format'
+import { firmaDetay, type FirmaDetay, type FirmaDetayTahsis, type FirmaDetayTaksit } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
-interface InvoiceRow {
-  id: string
-  fis_no: string
-  invoice_date: string
-  belge_no_raw: string
-  odeme_plani_raw: string
-  sale_type: string
-  sale_type_auto: string
-  sale_type_override: string | null
-  suggested_sale_type: string | null
-  amount_eur_cents: number | null
-  amount_eur_cents_override: number | null
-  amount_tl: number | null
-  plan_parse_status: string
-  plan_parse_note: string | null
-  is_31_12: boolean
-  is_cancelled: boolean
-  cancel_reason: string | null
-  excluded_override: boolean | null
-  is_excluded_firm: boolean
-  is_allocatable: boolean
-  needs_review: boolean
-  raw_changed_after_override: boolean
-}
-
-interface InstRow {
-  id: string
-  invoice_id: string
-  seq: number
-  side: string
-  due_date: string
-  amount_eur_cents: number
-  remaining_eur_cents: number | null
-  source: string
-  no_date_flag: boolean
-}
-
-interface PayRow {
-  id: string
-  islem_kodu: string
-  sheet_side: string
-  islem_tarihi: string | null
-  gelen_tl: number | null
-  doviz_eur_cents: number | null
-  kur: number | null
-  aciklama: string | null
-  kayit_durumu: string | null
-  is_alc: boolean
-  is_kdv: boolean
-  allocatable: boolean
-}
-
-interface AllocRow {
-  payment_id: string
-  installment_id: string
-  invoice_id: string
-  amount_eur_cents: number
+/** Vade listesini kısa yazar: aynı yıldaki tarihler '05.03 · 05.04 · 05.05.2026' */
+function vadeListesi(taksitler: FirmaDetayTaksit[]): string {
+  if (taksitler.length === 0) return ''
+  const tarihler = taksitler.map((t) => t.due_date).sort()
+  const yillar = new Set(tarihler.map((d) => d.slice(0, 4)))
+  if (yillar.size === 1 && tarihler.length > 1) {
+    const kisa = tarihler.map((d) => `${d.slice(8, 10)}.${d.slice(5, 7)}`)
+    return kisa.join(' · ') + '.' + tarihler[0].slice(0, 4)
+  }
+  return tarihler.map((d) => trDate(d)).join(' · ')
 }
 
 export default async function FirmaDetayPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound()
   const session = (await getSessionProfile())!
   const staff = isStaffRole(session.role)
   const supabase = await createServerSupabase()
 
-  const { data: firm } = await supabase
-    .from('firms')
-    .select('id, code_norm, code_raw, name, segment, city, phone, pazarlamaci_email, is_auto_created')
-    .eq('id', id)
-    .maybeSingle()
-  if (!firm) notFound()
-
-  const runId = await currentRunId(supabase)
-
-  let invoices: InvoiceRow[]
-  let installments: InstRow[]
-  let payments: PayRow[]
-  let balances: BalanceRow[]
+  // TEK ağ turu: firma + irsaliyeler + taksitler + ödemeler + tahsisler + bakiye
+  let veri: FirmaDetay | null
   try {
-    ;[invoices, installments, payments, balances] = await Promise.all([
-    fetchAll<InvoiceRow>((from, to) =>
-      supabase
-        .from('v_invoices_effective')
-        .select(
-          'id, fis_no, invoice_date, belge_no_raw, odeme_plani_raw, sale_type, sale_type_auto, sale_type_override, suggested_sale_type, amount_eur_cents, amount_eur_cents_override, amount_tl, plan_parse_status, plan_parse_note, is_31_12, is_cancelled, cancel_reason, excluded_override, is_excluded_firm, is_allocatable, needs_review, raw_changed_after_override',
-        )
-        .eq('firm_id', id)
-        .order('invoice_date', { ascending: false })
-        .order('fis_no', { ascending: false })
-        .range(from, to),
-    ),
-    fetchAll<InstRow>((from, to) =>
-      supabase
-        .from('installments')
-        .select('id, invoice_id, seq, side, due_date, amount_eur_cents, remaining_eur_cents, source, no_date_flag')
-        .eq('firm_id', id)
-        .order('due_date')
-        .range(from, to),
-    ),
-    fetchAll<PayRow>((from, to) =>
-      supabase
-        .from('payments')
-        .select('id, islem_kodu, sheet_side, islem_tarihi, gelen_tl, doviz_eur_cents, kur, aciklama, kayit_durumu, is_alc, is_kdv, allocatable')
-        .eq('firm_id', id)
-        .order('islem_tarihi', { ascending: false })
-        .range(from, to),
-    ),
-    runId
-      ? fetchAll<BalanceRow>((from, to) =>
-          supabase
-            .from('firm_balances')
-            .select(
-              'firm_id, pesin_open_eur_cents, vadeli_open_eur_cents, vadeli_overdue_eur_cents, credit_eur_cents, next_due_date, total_debt_eur_cents, total_paid_eur_cents',
-            )
-            .eq('run_id', runId)
-            .eq('firm_id', id)
-            .order('firm_id')
-            .range(from, to),
-        )
-      : Promise.resolve([] as BalanceRow[]),
-    ])
+    veri = await firmaDetay(supabase, id)
   } catch (e) {
     if (isMissingRelationError(e)) return <MigrationNeeded />
     throw e
   }
+  if (!veri) notFound()
 
-  const allocations = runId
-    ? await fetchAll<AllocRow>((from, to) =>
-        supabase
-          .from('allocations')
-          .select('payment_id, installment_id, invoice_id, amount_eur_cents')
-          .eq('run_id', runId)
-          .eq('firm_id', id)
-          .order('id')
-          .range(from, to),
-      )
-    : []
+  const { firma: firm, irsaliyeler: invoices, taksitler: installments, odemeler: payments, tahsisler: allocations } = veri
+  const bal = veri.bakiye
 
-  const instByInvoice = new Map<string, InstRow[]>()
+  const instByInvoice = new Map<string, FirmaDetayTaksit[]>()
   for (const t of installments) {
     const arr = instByInvoice.get(t.invoice_id)
     if (arr) arr.push(t)
     else instByInvoice.set(t.invoice_id, [t])
   }
   const invoiceById = new Map(invoices.map((i) => [i.id, i]))
-  const allocByPayment = new Map<string, AllocRow[]>()
+  const allocByPayment = new Map<string, FirmaDetayTahsis[]>()
   for (const a of allocations) {
     const arr = allocByPayment.get(a.payment_id)
     if (arr) arr.push(a)
     else allocByPayment.set(a.payment_id, [a])
   }
 
+  // Vadesi geçmiş ve ilk vade BUGÜNE göre canlı hesaplanır (son hesap anına göre değil)
   const today = todayISO()
-  const bal = balances[0]
+  const acikVadeli = installments.filter((t) => t.side === 'VADELI' && (t.remaining_eur_cents ?? 0) > 0)
+  const gecikmis = acikVadeli.filter((t) => t.due_date < today).reduce((s, t) => s + (t.remaining_eur_cents ?? 0), 0)
+  const ilkVade = acikVadeli.map((t) => t.due_date).sort()[0] ?? null
 
   return (
     <div>
@@ -189,8 +85,8 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Konsinye Açık Borç</p>
           <p className="mt-2 text-2xl font-bold tabular-nums">{eur(bal?.vadeli_open_eur_cents ?? 0)}</p>
           <p className="mt-1 text-xs text-slate-500">
-            Vadesi geçmiş: <span className="tabular-nums text-red-600">{eur(bal?.vadeli_overdue_eur_cents ?? 0)}</span>
-            {bal?.next_due_date && <> · İlk vade: {trDate(bal.next_due_date)}</>}
+            Vadesi geçmiş: <span className="tabular-nums text-red-600">{eur(gecikmis)}</span>
+            {ilkVade && <> · İlk vade: {trDate(ilkVade)}</>}
           </p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm">
@@ -200,7 +96,7 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
         <div className="rounded-2xl bg-white p-5 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Toplam Ödeme</p>
           <p className="mt-2 text-2xl font-bold tabular-nums text-emerald-600">{eur(bal?.total_paid_eur_cents ?? 0)}</p>
-          <p className="mt-1 text-xs text-slate-500">Tahsise giren ödemeler (KDV 1/5 hariç)</p>
+          <p className="mt-1 text-xs text-slate-500">Tahsise giren ödemeler (eşleşen KDV 1/5 dahil)</p>
         </div>
         <div className="rounded-2xl bg-white p-5 shadow-sm">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Alacak</p>
@@ -219,7 +115,7 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                 <th className="px-3 py-2">Fiş No</th>
                 <th className="px-3 py-2">Tarih</th>
                 <th className="px-3 py-2">Tip</th>
-                <th className="px-3 py-2">Ödeme Planı</th>
+                <th className="px-3 py-2">Vade / Plan</th>
                 <th className="px-3 py-2 text-right">Tutar €</th>
                 <th className="px-3 py-2 text-right">Kalan €</th>
                 <th className="px-3 py-2">Durum</th>
@@ -228,10 +124,13 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
             </thead>
             <tbody>
               {invoices.map((inv) => {
-                const insts = instByInvoice.get(inv.id) ?? []
+                const insts = (instByInvoice.get(inv.id) ?? []).slice().sort((a, b) => a.seq - b.seq)
                 const remaining = insts.reduce((s, t) => s + (t.remaining_eur_cents ?? 0), 0)
+                const elle = insts.some((t) => t.source === 'manual')
+                const tarihsiz = insts.some((t) => t.no_date_flag)
+                const etkinPlan = inv.plan_override_note ?? inv.odeme_plani_raw
                 return (
-                  <tr key={inv.id} className={'border-b border-slate-100 ' + (inv.is_cancelled ? 'opacity-50' : '')}>
+                  <tr key={inv.id} className={'border-b border-slate-100 align-top ' + (inv.is_cancelled ? 'opacity-50' : '')}>
                     <td className="px-3 py-2 font-medium">{inv.fis_no}</td>
                     <td className="px-3 py-2">{trDate(inv.invoice_date)}</td>
                     <td className="px-3 py-2">
@@ -242,8 +141,31 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-slate-500" title={inv.plan_parse_note ?? undefined}>
-                      {inv.odeme_plani_raw || <span className="text-amber-600">tarih girilmedi</span>}
+                    <td className="px-3 py-2" title={inv.plan_parse_note ?? undefined}>
+                      {/* Gerçek vade tarihleri (taksitlerden) — düzenleme anında burada görünür */}
+                      {insts.length > 0 ? (
+                        <span className={'tabular-nums ' + (tarihsiz ? 'text-amber-600' : 'text-slate-800')}>{vadeListesi(insts)}</span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        {elle ? (
+                          <span className="rounded bg-blue-100 px-1 text-blue-700" title={`Dosyadaki plan: ${inv.odeme_plani_raw || '—'}`}>
+                            elle girilen taksitler
+                          </span>
+                        ) : inv.plan_override_note !== null ? (
+                          <>
+                            Plan: {etkinPlan || '—'}{' '}
+                            <span className="rounded bg-blue-100 px-1 text-blue-700" title={`Dosyadaki plan: ${inv.odeme_plani_raw || '—'}`}>
+                              düzenlendi
+                            </span>
+                          </>
+                        ) : etkinPlan ? (
+                          <>Plan: {etkinPlan}</>
+                        ) : (
+                          <span className="text-amber-600">tarih girilmedi — irsaliye tarihi kullanıldı</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">
                       {eur(inv.amount_eur_cents)}
@@ -255,6 +177,14 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                     <td className="px-3 py-2 text-xs">
                       {inv.is_cancelled && <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700" title={inv.cancel_reason ?? ''}>İptal</span>}
                       {inv.is_31_12 && <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-600" title="31 Aralık tarihli irsaliyeler sistemde dikkate alınmaz">31/12</span>}
+                      {inv.is_iade && (
+                        <span
+                          className="rounded bg-violet-100 px-1.5 py-0.5 text-violet-700"
+                          title={inv.is_allocatable ? 'İade irsaliyesi — yönetici kararıyla borca dahil' : 'İade irsaliyesi — borca eklenmez'}
+                        >
+                          İade{inv.is_allocatable ? ' (borçta)' : ''}
+                        </span>
+                      )}
                       {(inv.excluded_override ?? inv.is_excluded_firm) && !inv.is_31_12 && !inv.is_cancelled && (
                         <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-600">Takip dışı</span>
                       )}
@@ -274,6 +204,7 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                             amountEurCents: inv.amount_eur_cents,
                             isCancelled: inv.is_cancelled,
                             odemePlaniRaw: inv.odeme_plani_raw,
+                            planOverride: inv.plan_override_note,
                             installments: insts.map((t) => ({ dueDate: t.due_date, amountCents: t.amount_eur_cents, source: t.source })),
                           }}
                         />
@@ -312,6 +243,7 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                       <td className={'px-3 py-2 ' + (overdue ? 'font-semibold text-red-600' : '')}>
                         {trDate(t.due_date)}
                         {t.no_date_flag && <span className="ml-1 text-amber-500" title="Vade tarihi girilmedi — irsaliye tarihi kullanıldı">†</span>}
+                        {t.source === 'manual' && <span className="ml-1 text-xs text-blue-600" title="Elle girilen taksit">✎</span>}
                       </td>
                       <td className="px-3 py-2">{inv?.fis_no}</td>
                       <td className="px-3 py-2">{t.side === 'PESIN' ? 'Peşin' : 'Konsinye'}</td>
@@ -345,6 +277,7 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                 const allocs = allocByPayment.get(p.id) ?? []
                 const allocated = allocs.reduce((s, a) => s + a.amount_eur_cents, 0)
                 const unmatched = p.allocatable && p.doviz_eur_cents ? p.doviz_eur_cents - allocated : 0
+                const kdvEslesti = allocs.length > 0
                 return (
                   <tr key={p.id} className={'border-b border-slate-100 ' + (!p.allocatable ? 'opacity-60' : '')}>
                     <td className="px-3 py-2 font-medium">
@@ -352,19 +285,14 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
                       {p.is_alc && <span className="ml-1 rounded bg-slate-200 px-1 text-xs text-slate-600" title="Eski sistemin alacak kaydı — tahsise girmez">ALC</span>}
                       {p.is_kdv && (
                         <span
-                          className={
-                            'ml-1 rounded px-1 text-xs ' +
-                            ((allocByPayment.get(p.id)?.length ?? 0) > 0
-                              ? 'bg-violet-100 text-violet-700'
-                              : 'bg-amber-100 text-amber-700')
-                          }
+                          className={'ml-1 rounded px-1 text-xs ' + (kdvEslesti ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700')}
                           title={
-                            (allocByPayment.get(p.id)?.length ?? 0) > 0
+                            kdvEslesti
                               ? 'KDV 1/5 ödemesi — referansındaki irsaliyeden düşüldü'
                               : 'KDV 1/5 ödemesi — irsaliye referansı çözülemedi, tahsise girmedi'
                           }
                         >
-                          {(allocByPayment.get(p.id)?.length ?? 0) > 0 ? 'KDV 1/5' : 'KDV — eşleşmedi'}
+                          {kdvEslesti ? 'KDV 1/5' : 'KDV — eşleşmedi'}
                         </span>
                       )}
                       {!p.is_alc && !p.is_kdv && !p.allocatable && (
@@ -401,8 +329,8 @@ export default async function FirmaDetayPage({ params }: { params: Promise<{ id:
         <p className="mt-2 text-xs text-slate-400">
           Eşleştirme kuralı: KDV 1/5 ödemeleri referansındaki (son 4 hane) irsaliyeden tamamıyla düşülür; diğer tüm
           ödemeler tek havuzda toplanır, önce peşin borçlar (en eski önce), sonra en yakın vadeli konsinye taksitleri
-          kapatılır. ALC kayıtları ve referansı çözülemeyen KDV ödemeleri tahsise girmez. Her içe aktarma/düzenleme
-          sonrası otomatik yeniden hesaplanır. Son güncelleme: {trDateTime(new Date().toISOString())}
+          kapatılır. ALC kayıtları ve referansı çözülemeyen KDV ödemeleri tahsise girmez. Her düzenlemeden sonra bu firma
+          anında yeniden hesaplanır.
         </p>
       </section>
     </div>

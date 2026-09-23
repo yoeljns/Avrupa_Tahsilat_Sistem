@@ -61,12 +61,18 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 ### 4) Veritabanı şemasını kurun
 1. [supabase.com/dashboard](https://supabase.com/dashboard) → projeniz → sol menüden **SQL Editor**.
 2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: **`supabase/migrations/0001_init.sql`** →
-   **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** (her birinin içeriğini yapıştırıp **Run**).
+   **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** → **`0004_hiz.sql`** →
+   **`0005_hiz_rls.sql`** (her birinin içeriğini yapıştırıp **Run**).
 3. Hepsinde "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
 
 > **Sistemi daha önce kurduysanız (güncelleme):** yalnız henüz çalıştırmadığınız migration
-> dosyalarını (örn. `0002` ve `0003`) sırayla çalıştırın, ardından uygulamada
-> **Pano → Yeniden Hesapla**'ya basın. Dosyaları yeniden yüklemeniz gerekmez.
+> dosyalarını sırayla çalıştırın, ardından uygulamada **Pano → Yeniden Hesapla**'ya basın.
+> Dosyaları yeniden yüklemeniz gerekmez.
+
+> **Bölge:** `vercel.json` uygulama sunucusunu Frankfurt'a (`fra1`) sabitler; Supabase
+> projesi de Frankfurt'tadır (`eu-central-1`). İkisi farklı kıtalarda olursa her sorgu
+> ~90 ms yol alır ve sayfalar saniyeler sürer. Supabase'i başka bölgede kurarsanız
+> `regions` değerini ona en yakın Vercel bölgesiyle değiştirin. Kontrol: `/api/saglik`.
 
 ### 5) Kurulum sihirbazını çalıştırın
 1. Tarayıcıda `https://<vercel-adresiniz>/setup` sayfasını açın.
@@ -104,7 +110,8 @@ yeniden hesaplanır.
 | `/setup` "Kurulum daha önce tamamlanmış" diyor | Normal — kullanıcılar zaten oluşturulmuş. Yeni kullanıcı/şifre işlemleri **Yönetim → Kullanıcılar**'dan yapılır. |
 | Pazarlamacı hiç firma göremiyor | Bayi listesindeki `pazarlamaci_email` ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayi Listesi**'nden dosyayı güncelleyin. |
 | İçe aktarma "yetkiniz yok" diyor | İçe aktarmayı yalnız Yönetici ve Tahsilat Yöneticisi yapabilir. |
-| Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı tazeleyebilirsiniz. |
+| Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı tazeleyebilirsiniz. |
+| Sayfalar yavaş açılıyor | `https://<adresiniz>/api/saglik` açın: `sunucu_bolgesi` `fra1` ve `en_hizli_tur_ms` 30'un altında olmalı. Değilse Vercel'de son dağıtımın üretimde olduğunu ve `vercel.json`'daki bölgeyi kontrol edin. |
 
 ## Geliştiriciler için
 

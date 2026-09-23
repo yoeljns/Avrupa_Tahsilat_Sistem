@@ -10,7 +10,7 @@ import {
   refreshInstallmentSides,
   regenerateInstallments,
 } from '@/lib/invoiceOps'
-import { runRecompute } from '@/lib/recompute'
+import { recomputeFirms } from '@/lib/recompute'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -18,6 +18,7 @@ export const maxDuration = 120
 
 // Tahsilat Yöneticisi irsaliye düzenlemeleri.
 // Her alan override olarak yazılır; içe aktarılan ham veri korunur.
+// Kayıttan sonra YALNIZ bu irsaliyenin firması yeniden hesaplanır (hızlı).
 
 const Body = z.object({
   saleType: z.enum(['PESIN', 'KONSINYE', 'KONSINYE_PESIN', 'OTHER']).optional(),
@@ -49,6 +50,8 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   const audits: Array<{ action: string; field?: string; oldValue?: unknown; newValue?: unknown; reason?: string | null }> = []
   let needsInstallmentRegen = false
   let needsSideRefresh = false
+  /** Yönetici açıkça YENİ PLAN girdi: elle taksitler dahil plan esas alınır */
+  let planGirildi = false
   let planDueDates: string[] | undefined
   let planNoDate = false
   let planSource: 'auto_plan' | 'default_invoice_date' = 'auto_plan'
@@ -123,6 +126,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     inv.plan_override_note = body.plan
     updates.needs_review = false
     needsInstallmentRegen = true
+    planGirildi = true
     planDueDates = planResult.dueDates
     planNoDate = planResult.status === 'empty_default'
     planSource = planResult.status === 'empty_default' ? 'default_invoice_date' : 'auto_plan'
@@ -173,17 +177,33 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   const { error: updateError } = await admin.from('invoices').update(updates).eq('id', id)
   if (updateError) return NextResponse.json({ error: 'Kayıt güncellenemedi: ' + updateError.message }, { status: 500 })
 
-  if (needsSideRefresh) await refreshInstallmentSides(admin, inv)
-  if (needsInstallmentRegen) {
-    await regenerateInstallments(admin, inv, {
-      dueDates: planDueDates,
-      noDateFlag: planNoDate,
-      source: planDueDates ? planSource : undefined,
-    })
+  try {
+    if (needsSideRefresh) await refreshInstallmentSides(admin, inv)
+    if (needsInstallmentRegen) {
+      const regen = await regenerateInstallments(admin, inv, {
+        dueDates: planDueDates,
+        noDateFlag: planNoDate,
+        source: planDueDates ? planSource : undefined,
+        // Yeni plan girildiyse ELLE taksitler de plana göre yeniden kurulur
+        force: planGirildi,
+      })
+      if (regen.durum === 'olceklendi') {
+        audits.push({
+          action: 'TAKSIT_OLCEKLEME',
+          field: 'taksitler',
+          newValue: { adet: regen.adet },
+          reason: 'Tutar değişti; elle girilen taksitler tarihleri korunarak yeni tutara oranlandı',
+        })
+      }
+    }
+
+    await auditInvoiceChange(admin, session.email, inv, audits)
+    const recompute = await recomputeFirms(admin, [inv.firm_id], session.email)
+    return NextResponse.json({ ok: true, recompute })
+  } catch (e) {
+    return NextResponse.json(
+      { error: 'Kayıt yapıldı ama hesap güncellenemedi: ' + (e instanceof Error ? e.message : String(e)) },
+      { status: 500 },
+    )
   }
-
-  await auditInvoiceChange(admin, session.email, inv, audits)
-  const recompute = await runRecompute(admin, 'edit', session.email)
-
-  return NextResponse.json({ ok: true, recompute: { runId: recompute.runId } })
 }

@@ -22,8 +22,15 @@ interface InvoiceActionsProps {
     amountEurCents: number | null
     isCancelled: boolean
     odemePlaniRaw: string
+    /** Yöneticinin daha önce girdiği plan (varsa) — ham plandan önceliklidir */
+    planOverride?: string | null
     installments: Array<{ dueDate: string; amountCents: number; source: string }>
   }
+}
+
+function trTarih(iso: string): string {
+  const [y, m, d] = iso.split('-')
+  return y && m && d ? `${d}.${m}.${y}` : iso
 }
 
 const TYPE_OPTIONS = [
@@ -34,6 +41,8 @@ const TYPE_OPTIONS = [
 
 export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
   const router = useRouter()
+  const etkinPlan = invoice.planOverride ?? invoice.odemePlaniRaw
+  const elleTaksit = invoice.installments.some((t) => t.source === 'manual')
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -177,15 +186,28 @@ export default function InvoiceActions({ invoice }: InvoiceActionsProps) {
                   <label className="block text-sm font-medium text-slate-700">
                     Vade Planı <span className="font-normal text-slate-400">(boş bırakılırsa değişmez)</span>
                   </label>
+                  <div className="mt-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    <div>
+                      Şu anki plan: <strong>{etkinPlan || '— (tarih girilmedi)'}</strong>
+                      {invoice.planOverride != null && <span className="ml-1 text-blue-700">(düzenlenmiş)</span>}
+                    </div>
+                    {invoice.installments.length > 0 && (
+                      <div className="mt-0.5">
+                        Mevcut vadeler: {invoice.installments.map((t) => trTarih(t.dueDate)).join(' · ')}
+                        {elleTaksit && <span className="ml-1 text-blue-700">(elle girilmiş)</span>}
+                      </div>
+                    )}
+                  </div>
                   <input
                     value={plan}
                     onChange={(e) => setPlan(e.target.value)}
-                    placeholder={invoice.odemePlaniRaw || 'örn: 05/3-4-5 veya 05.03.2026'}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    placeholder="örn: 05/3-4-5 veya 05.03.2026"
+                    className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                   <p className="mt-1 text-xs text-slate-400">
                     Biçimler: <code>05.03.2026</code> · <code>05/3-4-5</code> (aylar) · <code>05/ 4--8--12</code> (aralık) ·{' '}
-                    <code>NAKİT</code>
+                    <code>05/ 11-12-1</code> (yıl geçişi) · <code>NAKİT</code>
+                    {elleTaksit && ' — Yeni plan girerseniz elle girilen taksitler bu plana göre yeniden kurulur.'}
                   </p>
                 </div>
 

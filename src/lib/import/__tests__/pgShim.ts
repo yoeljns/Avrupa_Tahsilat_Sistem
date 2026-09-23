@@ -201,19 +201,45 @@ class QueryBuilder implements PromiseLike<Result> {
   }
 }
 
+/** Fonksiyon parametre tipleri (PostgREST gibi adlandırılmış argümanlar için). */
+async function argTypes(pool: Pool, cache: Map<string, Map<string, string>>, fn: string): Promise<Map<string, string>> {
+  const hit = cache.get(fn)
+  if (hit) return hit
+  const r = await pool.query<{ names: string[] | null; types: string[] }>(
+    `select p.proargnames as names,
+            array(select format_type(t, null) from unnest(p.proargtypes) t) as types
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname = $1
+     limit 1`,
+    [fn],
+  )
+  const m = new Map<string, string>()
+  const row = r.rows[0]
+  if (row?.names) row.names.forEach((name, i) => m.set(name, row.types[i]))
+  cache.set(fn, m)
+  return m
+}
+
 export function createPgShim(pool: Pool): SupabaseClient {
+  const sigCache = new Map<string, Map<string, string>>()
   const shim = {
     from(table: string) {
       return new QueryBuilder(pool, table)
     },
-    async rpc(fn: string, args: Record<string, unknown>) {
+    async rpc(fn: string, args: Record<string, unknown> = {}) {
       try {
+        const types = await argTypes(pool, sigCache, fn)
         const names = Object.keys(args)
         const params = names.map((n) => {
           const v = args[n]
-          return v !== null && typeof v === 'object' ? JSON.stringify(v) : v
+          const t = types.get(n) ?? ''
+          if (t === 'jsonb' || t === 'json') return v === null || v === undefined ? null : JSON.stringify(v)
+          return v // diziler (uuid[] vb.) pg tarafından dizi olarak gönderilir
         })
-        const ph = names.map((n, i) => `${n} := $${i + 1}${typeof args[n] === 'object' ? '::jsonb' : ''}`)
+        const ph = names.map((n, i) => {
+          const t = types.get(n)
+          return `${n} := $${i + 1}${t ? `::${t}` : ''}`
+        })
         const res = await pool.query(`SELECT public."${fn}"(${ph.join(', ')}) AS result`, params)
         return { data: res.rows[0]?.result ?? null, error: null }
       } catch (e) {

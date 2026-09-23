@@ -1,12 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { buildInstallments } from '@/lib/engine/installments'
+import { buildInstallments, scaleInstallmentAmounts } from '@/lib/engine/installments'
 import { parseOdemePlani } from '@/lib/engine/planParser'
 import type { SaleType } from '@/lib/engine/types'
 import { writeAudit, type AuditEntry } from '@/lib/db'
 
 // Tahsilat Yöneticisi'nin irsaliye düzenlemeleri: override yaz + taksitleri
 // tazele + denetim kaydı düş. Her başarılı düzenlemeden sonra çağıran taraf
-// runRecompute çalıştırır.
+// ilgili firmayı yeniden hesaplar (recomputeFirms).
 
 export interface InvoiceForOps {
   id: string
@@ -49,32 +49,85 @@ export async function loadInvoiceForOps(admin: SupabaseClient, id: string): Prom
   return (data as InvoiceForOps | null) ?? null
 }
 
+export type RegenDurumu = 'uretildi' | 'olceklendi' | 'manuel_korundu' | 'kaldirildi'
+
+interface MevcutTaksit {
+  id: string
+  seq: number
+  due_date: string
+  amount_eur_cents: number
+  source: string
+  side: string
+}
+
 /**
- * Manuel olmayan taksitleri verilen vade listesinden yeniden üretir.
- * dueDates boşsa mevcut otomatik taksitlerin tarihleri korunarak yalnız
- * tutarlar yeniden bölünür.
+ * İrsaliyenin taksitlerini etkin tip/tutar/plana göre tazeler.
+ *
+ *  * force=true (yönetici YENİ PLAN girdi): elle taksitler dahil hepsi silinir,
+ *    plan metninden yeniden üretilir — en son talimat geçerlidir.
+ *  * Elle taksit varsa (force yok): tarihler KORUNUR; etkin tutar değiştiyse
+ *    tutarlar yeni toplama oransal ölçeklenir ('olceklendi'), değişmediyse
+ *    dokunulmaz ('manuel_korundu').
+ *  * Aksi halde: dueDates verildiyse onlardan, verilmediyse (yönetici planı ??
+ *    dosyadaki plan) metninden üretilir.
  */
 export async function regenerateInstallments(
   admin: SupabaseClient,
   inv: InvoiceForOps,
-  opts: { dueDates?: string[]; noDateFlag?: boolean; source?: 'auto_plan' | 'default_invoice_date' | 'manual' } = {},
-): Promise<number> {
+  opts: {
+    dueDates?: string[]
+    noDateFlag?: boolean
+    source?: 'auto_plan' | 'default_invoice_date' | 'manual'
+    force?: boolean
+  } = {},
+): Promise<{ durum: RegenDurumu; adet: number }> {
   const type = effectiveType(inv)
   const side = sideOfType(type)
   const amount = effectiveAmount(inv)
 
-  const { data: existing } = await admin
+  const { data: existingRaw, error: selError } = await admin
     .from('installments')
-    .select('id, due_date, source, no_date_flag')
+    .select('id, seq, due_date, amount_eur_cents, source, side')
     .eq('invoice_id', inv.id)
     .order('seq')
-  const manual = (existing ?? []).filter((t) => t.source === 'manual')
+  if (selError) throw new Error('Taksitler okunamadı: ' + selError.message)
+  const existing = (existingRaw ?? []) as MevcutTaksit[]
+  const manual = existing.filter((t) => t.source === 'manual')
 
-  if (manual.length > 0) return 0 // manuel taksitler korunur; otomatik yenileme yapılmaz
   if (side === null || amount === null) {
-    // OTHER'a geri döndü veya tutar yok: otomatik taksitleri kaldır
-    await admin.from('installments').delete().eq('invoice_id', inv.id).neq('source', 'manual')
-    return 0
+    // OTHER'a döndü veya tutar yok: otomatik taksitler kaldırılır (elle olanlar kapsam dışı kalır)
+    const { error } = await admin.from('installments').delete().eq('invoice_id', inv.id).neq('source', 'manual')
+    if (error) throw new Error('Taksitler silinemedi: ' + error.message)
+    return { durum: 'kaldirildi', adet: 0 }
+  }
+
+  if (manual.length > 0 && !opts.force) {
+    const eskiToplam = manual.reduce((s, t) => s + Number(t.amount_eur_cents), 0)
+    const tarafDegisti = manual.some((t) => t.side !== side)
+    if (eskiToplam === amount && !tarafDegisti) return { durum: 'manuel_korundu', adet: manual.length }
+
+    const yeniTutarlar = scaleInstallmentAmounts(
+      manual.map((t) => Number(t.amount_eur_cents)),
+      amount,
+    )
+    // otomatik taksit kalıntısı varsa temizle, elle olanları yeni tutarla yeniden yaz
+    const { error: delError } = await admin.from('installments').delete().eq('invoice_id', inv.id)
+    if (delError) throw new Error('Taksitler silinemedi: ' + delError.message)
+    const { error: insError } = await admin.from('installments').insert(
+      manual.map((t, i) => ({
+        invoice_id: inv.id,
+        firm_id: inv.firm_id,
+        side,
+        seq: i + 1,
+        due_date: t.due_date,
+        amount_eur_cents: yeniTutarlar[i],
+        source: 'manual',
+        no_date_flag: false,
+        remaining_eur_cents: null,
+      })),
+    )
+    if (insError) throw new Error('Taksitler yazılamadı: ' + insError.message)
+    return { durum: eskiToplam === amount ? 'manuel_korundu' : 'olceklendi', adet: manual.length }
   }
 
   let dueDates = opts.dueDates
@@ -89,7 +142,12 @@ export async function regenerateInstallments(
     source = plan.status === 'empty_default' || plan.status === 'unparsed' ? 'default_invoice_date' : 'auto_plan'
   }
 
-  await admin.from('installments').delete().eq('invoice_id', inv.id).neq('source', 'manual')
+  const del = opts.force
+    ? admin.from('installments').delete().eq('invoice_id', inv.id)
+    : admin.from('installments').delete().eq('invoice_id', inv.id).neq('source', 'manual')
+  const { error: delError } = await del
+  if (delError) throw new Error('Taksitler silinemedi: ' + delError.message)
+
   const built = buildInstallments(amount, dueDates)
   if (built.length > 0) {
     const { error } = await admin.from('installments').insert(
@@ -107,14 +165,15 @@ export async function regenerateInstallments(
     )
     if (error) throw new Error('Taksitler yazılamadı: ' + error.message)
   }
-  return built.length
+  return { durum: 'uretildi', adet: built.length }
 }
 
 /** Taksitlerin side alanını etkin tipe göre günceller (tip değişince). */
 export async function refreshInstallmentSides(admin: SupabaseClient, inv: InvoiceForOps): Promise<void> {
   const side = sideOfType(effectiveType(inv))
   if (side === null) return
-  await admin.from('installments').update({ side }).eq('invoice_id', inv.id)
+  const { error } = await admin.from('installments').update({ side }).eq('invoice_id', inv.id)
+  if (error) throw new Error('Taksit tarafı güncellenemedi: ' + error.message)
 }
 
 export async function auditInvoiceChange(

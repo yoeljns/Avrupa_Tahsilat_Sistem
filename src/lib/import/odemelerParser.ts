@@ -94,17 +94,25 @@ function cellCents(v: Cell): number | null {
   return null
 }
 
-function cellTimestamp(v: Cell): string | null {
+export function cellTimestamp(v: Cell): string | null {
   if (typeof v === 'number') return excelSerialToTimestamp(v)
   if (typeof v === 'string' && v.trim()) {
-    // '2026-01-05 00:00:00' veya '05.01.2026' biçimleri
-    const iso = v.trim().replace(' ', 'T')
-    const d = new Date(iso.includes('T') ? iso + (iso.endsWith('Z') ? '' : 'Z') : iso)
-    if (!Number.isNaN(d.getTime())) return d.toISOString()
-    const tr = /^(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(v.trim())
+    const s = v.trim()
+    // Türkçe gün.ay.yıl ÖNCE denenir: new Date('05.01.2026') ayı-önce okuyup
+    // 1 Mayıs üretir — 12'den küçük günlerde gün ile ay yer değiştirirdi.
+    const tr = /^(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(s)
     if (tr) {
       const [, dd, mm, yyyy] = tr
+      const gun = parseInt(dd, 10)
+      const ay = parseInt(mm, 10)
+      if (ay < 1 || ay > 12 || gun < 1 || gun > 31) return null
       return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}T00:00:00.000Z`
+    }
+    // Yalnız ISO biçimi ('2026-01-05' / '2026-01-05 00:00:00') Date'e verilir
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      const iso = s.replace(' ', 'T')
+      const d = new Date(iso.includes('T') ? iso + (/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? '' : 'Z') : iso)
+      if (!Number.isNaN(d.getTime())) return d.toISOString()
     }
   }
   return null

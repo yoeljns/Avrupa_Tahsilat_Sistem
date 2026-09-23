@@ -17,6 +17,8 @@ export interface PlanParseResult {
   /** ISO (YYYY-MM-DD) vade tarihleri, sıralı. Boş plan ve çözülemeyen planda irsaliye tarihi tek vade olur. */
   dueDates: string[]
   note?: string
+  /** Çözüldü ama vade irsaliye tarihinden çok önce — incelemeye düşer */
+  supheli?: boolean
 }
 
 export interface ClassifyResult {

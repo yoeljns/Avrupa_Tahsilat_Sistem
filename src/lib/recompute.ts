@@ -1,14 +1,27 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { fisNoDigitCount, fisNoSuffix4, parseKdvRefs } from '@/lib/engine/kdvRefs'
-import { foldFirmCodeForExclusion } from '@/lib/engine/normalize'
 import { reconcile } from '@/lib/engine/reconcile'
-import type { EngineInstallment, EnginePayment, Side } from '@/lib/engine/types'
-import { chunkedWrite, fetchAll } from '@/lib/db'
+import type { EngineOutput } from '@/lib/engine/types'
+import { fetchAll } from '@/lib/db'
+import { todayISO } from '@/lib/format'
+import {
+  haricFirmaKumesi,
+  motorGirdisiKur,
+  type GirdiIrsaliye,
+  type GirdiOdeme,
+  type GirdiTaksit,
+} from '@/lib/tahsisGirdisi'
 
-// Mutabakatı baştan hesaplar ve SÜRÜMLÜ olarak yazar:
-// yeni recon_run altına tüm tahsisler + firma bakiyeleri yazılır, ardından
-// app_settings.current_recon_run işaretçisi çevrilir. Okuyucular asla
-// yarım yazılmış koşu görmez. Son 5 koşu saklanır.
+// Mutabakat (tahsis) hesabı — iki yol, TEK kural:
+//
+//  * runRecompute (TAM): içe aktarma, "Yeniden Hesapla" ve takip dışı liste
+//    değişikliğinde. Tüm firmalar yeni bir koşu (recon_run) altına yazılır,
+//    sonra işaretçi kilit altında çevrilir — okuyucular asla yarım koşu görmez.
+//
+//  * recomputeFirms (FİRMA BAZLI): irsaliye/taksit düzenlemesinden sonra.
+//    Tahsis kuralı firma başına işlediği için (bir firmanın ödemesi başka
+//    firmanın borcunu kapatmaz) yalnız düzenlenen firma hesaplanıp güncel
+//    koşuya yazılır. Sonuç tam hesapla BİREBİR aynıdır, ama saniyeler yerine
+//    milisaniyeler sürer.
 //
 // Tahsis kuralı (tek havuz): ödemenin geldiği sayfa (PEŞİN/VADELİ) önemsizdir;
 // firma başına tüm ödemeler önce peşin borçları, sonra en yakın vadeli
@@ -17,36 +30,6 @@ import { chunkedWrite, fetchAll } from '@/lib/db'
 // girmez. ALC ve TAMAMLANMAMIŞ kayıtlar her zaman dışarıdadır.
 
 export type TriggerKind = 'import' | 'edit' | 'manual' | 'setup'
-
-interface EffectiveInvoiceRow {
-  id: string
-  firm_id: string
-  fis_no: string
-  invoice_date: string
-  side: Side | null
-  is_allocatable: boolean
-  is_excluded_firm: boolean
-}
-
-interface InstallmentRow {
-  id: string
-  invoice_id: string
-  firm_id: string
-  seq: number
-  due_date: string
-  amount_eur_cents: number
-}
-
-interface PaymentRow {
-  id: string
-  islem_kodu: string
-  firm_id: string
-  islem_tarihi: string | null
-  doviz_eur_cents: number | null
-  is_kdv: boolean | null
-  kdv_fatura_referansi: string | null
-  aciklama: string | null
-}
 
 export interface RecomputeStats {
   runId: string
@@ -57,246 +40,262 @@ export interface RecomputeStats {
   totalCreditCents: number
 }
 
+/** Paralel ama sınırlı eşzamanlı parça yazımı (veritabanını boğmadan hızlı). */
+async function parcaParcaYaz<T>(
+  rows: T[],
+  size: number,
+  concurrency: number,
+  write: (chunk: T[]) => PromiseLike<{ error: { message: string } | null }>,
+): Promise<void> {
+  const chunks: T[][] = []
+  for (let i = 0; i < rows.length; i += size) chunks.push(rows.slice(i, i + size))
+  let next = 0
+  async function worker() {
+    while (next < chunks.length) {
+      const chunk = chunks[next++]
+      const { error } = await write(chunk)
+      if (error) throw new Error(error.message)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker))
+}
+
+function tahsisSatirlari(result: EngineOutput) {
+  return result.allocations.map((a) => ({
+    payment_id: a.paymentId,
+    installment_id: a.installmentId,
+    invoice_id: a.invoiceId,
+    firm_id: a.firmId,
+    side: a.side,
+    amount_eur_cents: a.amountCents,
+  }))
+}
+
+function bakiyeSatirlari(result: EngineOutput) {
+  return result.balances.map((b) => ({
+    firm_id: b.firmId,
+    pesin_open_eur_cents: b.pesinOpenCents,
+    vadeli_open_eur_cents: b.vadeliOpenCents,
+    vadeli_overdue_eur_cents: b.vadeliOverdueCents,
+    credit_eur_cents: b.creditCents,
+    next_due_date: b.nextDueDate,
+    total_debt_eur_cents: b.totalDebtCents,
+    total_paid_eur_cents: b.totalPaidCents,
+  }))
+}
+
+/** Yanıttan SONRA çalıştırılabilecek temizlik işi (Next `after`); istek dışında hemen koşar. */
+async function sonra(is: () => Promise<unknown>): Promise<void> {
+  try {
+    const { after } = await import('next/server')
+    after(async () => {
+      try {
+        await is()
+      } catch {
+        // temizlik hatası kullanıcı işini bozmaz
+      }
+    })
+  } catch {
+    try {
+      await is()
+    } catch {
+      // yok say
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TAM YENİDEN HESAP
+// ---------------------------------------------------------------------------
 export async function runRecompute(
   admin: SupabaseClient,
   triggerKind: TriggerKind,
   actorEmail: string,
 ): Promise<RecomputeStats> {
-  const asOf = new Date().toISOString().slice(0, 10)
+  const asOf = todayISO()
 
-  // 1) Etkin (tahsis edilebilir) irsaliyeler
-  const invoices = await fetchAll<EffectiveInvoiceRow>((from, to) =>
-    admin
-      .from('v_invoices_effective')
-      .select('id, firm_id, fis_no, invoice_date, side, is_allocatable, is_excluded_firm')
-      .order('id')
-      .range(from, to),
-  )
-  const allocatable = new Map<string, EffectiveInvoiceRow>()
-  for (const inv of invoices) {
-    if (inv.is_allocatable && inv.side) allocatable.set(inv.id, inv)
-  }
-
-  // Hariç firmalar: ödemeleri de kapsam dışı kalır (Türkçe katlamalı eşleşme)
-  const excludedFirmIds = new Set<string>()
-  {
-    const firms = await fetchAll<{ id: string; code_norm: string }>((from, to) =>
-      admin.from('firms').select('id, code_norm').order('id').range(from, to),
-    )
-    const excludedCodes = await fetchAll<{ code_norm: string }>((from, to) =>
-      admin.from('excluded_firm_codes').select('code_norm').order('code_norm').range(from, to),
-    )
-    const codes = new Set(excludedCodes.map((c) => foldFirmCodeForExclusion(c.code_norm)))
-    for (const f of firms) if (codes.has(foldFirmCodeForExclusion(f.code_norm))) excludedFirmIds.add(f.id)
-  }
-
-  // 2) Taksitler
-  const allInstallments = await fetchAll<InstallmentRow>((from, to) =>
-    admin
-      .from('installments')
-      .select('id, invoice_id, firm_id, seq, due_date, amount_eur_cents')
-      .order('id')
-      .range(from, to),
-  )
-  const engineInstallments: EngineInstallment[] = []
-  const outOfScopeInstallmentIds: string[] = []
-  for (const t of allInstallments) {
-    const inv = allocatable.get(t.invoice_id)
-    if (!inv) {
-      outOfScopeInstallmentIds.push(t.id)
-      continue
-    }
-    engineInstallments.push({
-      id: t.id,
-      invoiceId: t.invoice_id,
-      firmId: t.firm_id,
-      side: inv.side!,
-      dueDate: t.due_date,
-      invoiceDate: inv.invoice_date,
-      fisNo: inv.fis_no,
-      seq: t.seq,
-      amountCents: t.amount_eur_cents,
-    })
-  }
-
-  // KDV referans eşleşmesi için: firma → son4 → kapsam içi irsaliye adayları
-  const suffixIndex = new Map<string, Map<string, EffectiveInvoiceRow[]>>()
-  for (const inv of allocatable.values()) {
-    const suffix = fisNoSuffix4(inv.fis_no)
-    if (!suffix) continue
-    let m = suffixIndex.get(inv.firm_id)
-    if (!m) suffixIndex.set(inv.firm_id, (m = new Map()))
-    const arr = m.get(suffix)
-    if (arr) arr.push(inv)
-    else m.set(suffix, [inv])
-  }
-
-  /** Tüm referanslar çözülürse hedef irsaliye id'leri; aksi halde null (eşleşmedi). */
-  function resolveKdvTargets(firmId: string, refs: string[]): string[] | null {
-    if (refs.length === 0) return null
-    const byFirm = suffixIndex.get(firmId)
-    if (!byFirm) return null
-    const targets: string[] = []
-    for (const ref of refs) {
-      const candidates = byFirm.get(ref)
-      if (!candidates || candidates.length === 0) return null
-      let pick = candidates[0]
-      if (candidates.length > 1) {
-        // Çakışmada standart (en uzun rakamlı) fiş tercih edilir; eşitlik → belirsiz
-        const sorted = [...candidates].sort(
-          (a, b) => fisNoDigitCount(b.fis_no) - fisNoDigitCount(a.fis_no) || (a.fis_no < b.fis_no ? -1 : 1),
-        )
-        if (fisNoDigitCount(sorted[0].fis_no) === fisNoDigitCount(sorted[1].fis_no)) return null
-        pick = sorted[0]
-      }
-      if (!targets.includes(pick.id)) targets.push(pick.id)
-    }
-    return targets
-  }
-
-  // 3) Tahsise açık ödemeler (tek havuz; KDV hedefli)
-  const paymentRows = await fetchAll<PaymentRow>((from, to) =>
-    admin
-      .from('payments')
-      .select('id, islem_kodu, firm_id, islem_tarihi, doviz_eur_cents, is_kdv, kdv_fatura_referansi, aciklama')
-      .eq('allocatable', true)
-      .order('id')
-      .range(from, to),
-  )
-  const enginePayments: EnginePayment[] = []
-  let kdvMatched = 0
-  let kdvUnmatched = 0
-  for (const p of paymentRows) {
-    if (excludedFirmIds.has(p.firm_id)) continue
-    if (!p.doviz_eur_cents || p.doviz_eur_cents <= 0) continue
-    if (p.is_kdv) {
-      const refs = parseKdvRefs(p.kdv_fatura_referansi, p.aciklama)
-      const targets = resolveKdvTargets(p.firm_id, refs)
-      if (!targets) {
-        kdvUnmatched++
-        continue // eşleşmeyen KDV ödemesi tahsise girmez (panelde 'eşleşmedi' görünür)
-      }
-      kdvMatched++
-      enginePayments.push({
-        id: p.id,
-        islemKodu: p.islem_kodu,
-        firmId: p.firm_id,
-        dateISO: p.islem_tarihi ?? '9999-12-31T00:00:00.000Z',
-        amountCents: p.doviz_eur_cents,
-        isKdv: true,
-        targetInvoiceIds: targets,
-      })
-      continue
-    }
-    enginePayments.push({
-      id: p.id,
-      islemKodu: p.islem_kodu,
-      firmId: p.firm_id,
-      dateISO: p.islem_tarihi ?? '9999-12-31T00:00:00.000Z',
-      amountCents: p.doviz_eur_cents,
-    })
-  }
-
-  // 4) Saf motor
-  const result = reconcile({ installments: engineInstallments, payments: enginePayments, asOf })
-
-  // 5) Yeni koşuyu yaz
+  // 0) Koşuyu ÖNCE aç: başlangıç anı, hesap sürerken gelen düzenlemeleri
+  //    yakalamak için referanstır (işaretçi çevrilene kadar kimse görmez).
   const { data: run, error: runError } = await admin
     .from('recon_runs')
-    .insert({
-      triggered_by: actorEmail,
-      trigger_kind: triggerKind,
-      stats: {
-        as_of: asOf,
-        ...result.stats,
-        kdv_eslesen: kdvMatched,
-        kdv_eslesmeyen: kdvUnmatched,
-      },
-    })
+    .insert({ triggered_by: actorEmail, trigger_kind: triggerKind, stats: { as_of: asOf } })
     .select('id')
     .single()
   if (runError || !run) throw new Error('Mutabakat koşusu açılamadı: ' + runError?.message)
   const runId = run.id as string
 
-  await chunkedWrite(result.allocations, (chunk) =>
-    admin.from('allocations').insert(
-      chunk.map((a) => ({
-        run_id: runId,
-        payment_id: a.paymentId,
-        installment_id: a.installmentId,
-        invoice_id: a.invoiceId,
-        firm_id: a.firmId,
-        side: a.side,
-        amount_eur_cents: a.amountCents,
-      })),
+  // 1) Girdiler — birbirinden bağımsız, PARALEL okunur
+  const [irsaliyeler, firmalar, haricKodlar, taksitler, odemeler] = await Promise.all([
+    fetchAll<GirdiIrsaliye>((from, to) =>
+      admin
+        .from('v_invoices_effective')
+        .select('id, firm_id, fis_no, invoice_date, side, is_allocatable')
+        .order('id')
+        .range(from, to),
     ),
-  )
-
-  await chunkedWrite(result.balances, (chunk) =>
-    admin.from('firm_balances').insert(
-      chunk.map((b) => ({
-        run_id: runId,
-        firm_id: b.firmId,
-        pesin_open_eur_cents: b.pesinOpenCents,
-        vadeli_open_eur_cents: b.vadeliOpenCents,
-        vadeli_overdue_eur_cents: b.vadeliOverdueCents,
-        credit_eur_cents: b.creditCents,
-        next_due_date: b.nextDueDate,
-        total_debt_eur_cents: b.totalDebtCents,
-        total_paid_eur_cents: b.totalPaidCents,
-      })),
+    fetchAll<{ id: string; code_norm: string }>((from, to) =>
+      admin.from('firms').select('id, code_norm').order('id').range(from, to),
     ),
-  )
+    fetchAll<{ code_norm: string }>((from, to) =>
+      admin.from('excluded_firm_codes').select('code_norm').order('code_norm').range(from, to),
+    ),
+    fetchAll<GirdiTaksit>((from, to) =>
+      admin
+        .from('installments')
+        .select('id, invoice_id, firm_id, seq, due_date, amount_eur_cents')
+        .order('id')
+        .range(from, to),
+    ),
+    fetchAll<GirdiOdeme>((from, to) =>
+      admin
+        .from('payments')
+        .select('id, islem_kodu, firm_id, islem_tarihi, doviz_eur_cents, is_kdv, kdv_fatura_referansi, aciklama')
+        .eq('allocatable', true)
+        .order('id')
+        .range(from, to),
+    ),
+  ])
 
-  // 6) Taksit kalanlarını güncelle (kapsam dışı taksitlerde NULL)
-  const remainingUpdates: Array<{ id: string; remaining: number | null }> = []
-  for (const t of engineInstallments) {
-    remainingUpdates.push({ id: t.id, remaining: result.remainingByInstallment.get(t.id) ?? t.amountCents })
+  // 2) Saf motor
+  const haric = haricFirmaKumesi(
+    firmalar,
+    haricKodlar.map((k) => k.code_norm),
+  )
+  const girdi = motorGirdisiKur(irsaliyeler, taksitler, odemeler, haric)
+  const result = reconcile({ installments: girdi.installments, payments: girdi.payments, asOf })
+
+  // 3) Sonuçları yeni koşuya yaz — parçalar paralel
+  const kalanlar: Array<{ id: string; remaining: number | null }> = []
+  for (const t of girdi.installments) {
+    kalanlar.push({ id: t.id, remaining: result.remainingByInstallment.get(t.id) ?? t.amountCents })
   }
-  for (const id of outOfScopeInstallmentIds) remainingUpdates.push({ id, remaining: null })
+  for (const id of girdi.kapsamDisiTaksitIds) kalanlar.push({ id, remaining: null })
 
-  await chunkedWrite(
-    remainingUpdates,
-    async (chunk) => {
+  await Promise.all([
+    parcaParcaYaz(
+      tahsisSatirlari(result).map((a) => ({ ...a, run_id: runId })),
+      500,
+      4,
+      (chunk) => admin.from('allocations').insert(chunk),
+    ),
+    parcaParcaYaz(
+      bakiyeSatirlari(result).map((b) => ({ ...b, run_id: runId })),
+      500,
+      2,
+      (chunk) => admin.from('firm_balances').insert(chunk),
+    ),
+    parcaParcaYaz(kalanlar, 1000, 4, async (chunk) => {
       const { error } = await admin.rpc('bulk_set_installment_remaining', { updates: chunk })
       return { error }
-    },
-    1000,
-  )
+    }),
+    admin
+      .from('recon_runs')
+      .update({
+        stats: {
+          as_of: asOf,
+          ...result.stats,
+          kdv_eslesen: girdi.kdvEslesen,
+          kdv_eslesmeyen: girdi.kdvEslesmeyen,
+        },
+      })
+      .eq('id', runId)
+      .then(({ error }) => {
+        if (error) throw new Error(error.message)
+      }),
+  ])
 
-  // 7) İşaretçiyi çevir
-  const { error: flipError } = await admin
-    .from('app_settings')
-    .upsert(
-      { key: 'current_recon_run', value: { run_id: runId }, updated_at: new Date().toISOString() },
-      { onConflict: 'key' },
-    )
+  // 4) İşaretçiyi kilit altında çevir; hesap sürerken düzenlenen firmaları al
+  const { data: yakalanan, error: flipError } = await admin.rpc('rpc_kosu_cevir', { p_run_id: runId })
   if (flipError) throw new Error('Koşu işaretçisi güncellenemedi: ' + flipError.message)
 
-  await admin.from('recon_runs').update({ finished_at: new Date().toISOString() }).eq('id', runId)
-
-  // 8) Eski koşuları buda (son 5 kalsın)
-  const { data: oldRuns } = await admin
-    .from('recon_runs')
-    .select('id')
-    .order('started_at', { ascending: false })
-    .range(5, 50)
-  if (oldRuns && oldRuns.length > 0) {
-    await admin
-      .from('recon_runs')
-      .delete()
-      .in(
-        'id',
-        oldRuns.map((r) => r.id),
-      )
+  // 5) Bu arada düzenlenen firmalar varsa onları hemen yeni koşuda tazele
+  const yakalananFirmalar = Array.isArray(yakalanan) ? (yakalanan as string[]) : []
+  if (yakalananFirmalar.length > 0) {
+    await recomputeFirms(admin, yakalananFirmalar, actorEmail)
   }
+
+  // 6) Eski koşuları yanıttan sonra temizle (son 5 kalır)
+  await sonra(async () => {
+    await admin.rpc('rpc_eski_kosulari_buda', { p_tut: 5 })
+  })
 
   return {
     runId,
-    installmentCount: engineInstallments.length,
-    paymentCount: enginePayments.length,
+    installmentCount: girdi.installments.length,
+    paymentCount: girdi.payments.length,
     allocationCount: result.allocations.length,
     totalOpenCents: result.stats.totalOpenCents,
     totalCreditCents: result.stats.totalCreditCents,
   }
+}
+
+// ---------------------------------------------------------------------------
+// FİRMA BAZLI YENİDEN HESAP
+// ---------------------------------------------------------------------------
+interface TahsisGirdisiRpc {
+  run_id: string | null
+  surum: string
+  firmalar: Array<{ id: string; code_norm: string }>
+  haric_kodlar: string[]
+  irsaliyeler: GirdiIrsaliye[]
+  taksitler: GirdiTaksit[]
+  odemeler: GirdiOdeme[]
+}
+
+export interface FirmRecomputeResult {
+  runId: string
+  /** 'firma': yalnız verilen firmalar hesaplandı; 'tam': güncel koşu yoktu, tam hesap yapıldı */
+  mode: 'firma' | 'tam'
+  firmCount: number
+}
+
+const DENEME_SAYISI = 4
+
+export async function recomputeFirms(
+  admin: SupabaseClient,
+  firmIds: string[],
+  actorEmail: string,
+): Promise<FirmRecomputeResult> {
+  const ids = Array.from(new Set(firmIds.filter(Boolean)))
+  if (ids.length === 0) {
+    const { data } = await admin.from('v_current_run').select('run_id').maybeSingle()
+    return { runId: (data?.run_id as string | undefined) ?? '', mode: 'firma', firmCount: 0 }
+  }
+
+  for (let deneme = 1; deneme <= DENEME_SAYISI; deneme++) {
+    const { data, error } = await admin.rpc('rpc_tahsis_girdisi', { p_firm_ids: ids })
+    if (error) throw new Error('Tahsis girdisi okunamadı: ' + error.message)
+    const g = data as TahsisGirdisiRpc
+
+    // Henüz hiç koşu yoksa (ilk kurulum) tam hesap yap
+    if (!g.run_id) {
+      const tam = await runRecompute(admin, 'edit', actorEmail)
+      return { runId: tam.runId, mode: 'tam', firmCount: ids.length }
+    }
+
+    const haric = haricFirmaKumesi(g.firmalar ?? [], g.haric_kodlar ?? [])
+    const girdi = motorGirdisiKur(g.irsaliyeler ?? [], g.taksitler ?? [], g.odemeler ?? [], haric)
+    const result = reconcile({ installments: girdi.installments, payments: girdi.payments, asOf: todayISO() })
+
+    const kalanlar: Array<{ id: string; remaining: number }> = girdi.installments.map((t) => ({
+      id: t.id,
+      remaining: result.remainingByInstallment.get(t.id) ?? t.amountCents,
+    }))
+
+    const { data: sonuc, error: yazError } = await admin.rpc('rpc_tahsis_yaz', {
+      p_run_id: g.run_id,
+      p_firm_ids: ids,
+      p_surum: g.surum,
+      p_tahsisler: tahsisSatirlari(result),
+      p_bakiyeler: bakiyeSatirlari(result),
+      p_kalanlar: kalanlar,
+    })
+    if (yazError) throw new Error('Tahsis yazılamadı: ' + yazError.message)
+    if (sonuc === 'OK') return { runId: g.run_id, mode: 'firma', firmCount: ids.length }
+    // 'SURUM_DEGISTI' / 'ESKI_KOSU': bu arada biri veriyi değiştirdi → taze girdiyle tekrar
+  }
+
+  // Sürekli çakışma (çok nadir): güvenli yol — tam hesap
+  const tam = await runRecompute(admin, 'edit', actorEmail)
+  return { runId: tam.runId, mode: 'tam', firmCount: ids.length }
 }

@@ -14,18 +14,38 @@ export function trDate(iso: string | null | undefined): string {
   return `${d}.${m}.${y}`
 }
 
-/** ISO zaman damgası → '05.03.2026 14:30' */
+// İş Türkiye saatine göre yürür: "bugün" ve saatler Europe/Istanbul'dur.
+// (UTC kullanılsaydı gece 00:00-03:00 arası sistem hâlâ "dün"de kalırdı.)
+const ISTANBUL = 'Europe/Istanbul'
+
+function istanbulParcalari(d: Date): Record<string, string> {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: ISTANBUL,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(d)
+  const out: Record<string, string> = {}
+  for (const p of parts) out[p.type] = p.value
+  return out
+}
+
+/** ISO zaman damgası → '05.03.2026 14:30' (Türkiye saati) */
 export function trDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(d.getUTCDate())}.${pad(d.getUTCMonth() + 1)}.${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+  const p = istanbulParcalari(d)
+  return `${p.day}.${p.month}.${p.year} ${p.hour}:${p.minute}`
 }
 
-/** Bugünün ISO günü (UTC). */
-export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+/** Bugünün ISO günü (Türkiye saatine göre). */
+export function todayISO(now: Date = new Date()): string {
+  const p = istanbulParcalari(now)
+  return `${p.year}-${p.month}-${p.day}`
 }
 
 /** 'YYYY-MM' → Türkçe ay adı: '2026-03' → 'Mart 2026' */

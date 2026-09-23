@@ -13,11 +13,9 @@ export default function MigrationNeeded() {
           Supabase Dashboard → <strong>SQL Editor</strong>&apos;ü açın.
         </li>
         <li>
-          Repodaki <code className="rounded bg-amber-100 px-1">supabase/migrations/0002_havuz_tahsis.sql</code>{' '}
-          dosyasının içeriğini yapıştırıp <strong>Run</strong> deyin.
-        </li>
-        <li>
-          Aynı şekilde <code className="rounded bg-amber-100 px-1">0003_kdv_eslestirme.sql</code> dosyasını çalıştırın.
+          Repodaki <code className="rounded bg-amber-100 px-1">supabase/migrations</code> klasöründeki dosyaları{' '}
+          <strong>sırayla</strong> (0002 → 0003 → 0004 → 0005) yapıştırıp her birinde <strong>Run</strong> deyin.
+          Daha önce çalıştırdıklarınızı yeniden çalıştırmak zarar vermez.
         </li>
         <li>
           Bu sayfaya dönüp yenileyin ve <strong>Pano → Yeniden Hesapla</strong>&apos;ya basın.
@@ -38,6 +36,9 @@ export function isMissingRelationError(e: unknown): boolean {
     /could not find the table/i.test(msg) ||
     /schema cache/i.test(msg) ||
     msg.includes('PGRST205') ||
+    msg.includes('PGRST202') ||
+    /could not find the function/i.test(msg) ||
+    /function .* does not exist/i.test(msg) ||
     /column .* does not exist/i.test(msg)
   )
 }

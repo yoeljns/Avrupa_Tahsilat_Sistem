@@ -124,6 +124,7 @@ export function parseIrsaliyeXls(buf: Buffer | ArrayBuffer): ParsedIrsaliye {
     const reviewReasons: string[] = []
     if (classify.needsReview) reviewReasons.push(classify.reason)
     if (plan.status === 'unparsed') reviewReasons.push(plan.note ?? 'Ödeme planı çözülemedi')
+    if (plan.supheli && !is3112) reviewReasons.push(plan.note ?? 'Vade irsaliye tarihinden çok önce')
     if (amountEurCents === null && !is3112) reviewReasons.push('EURO tutarı okunamadı')
 
     records.push({

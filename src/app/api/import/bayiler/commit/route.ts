@@ -30,24 +30,37 @@ export async function POST(request: Request) {
   if (records.length === 0) return NextResponse.json({ error: 'Uygulanacak geçerli satır yok.' }, { status: 400 })
 
   const now = new Date().toISOString()
+  // Yalnız dosyada BULUNAN kolonlar yazılır; olmayanlar mevcut firmada korunur.
+  // (Eski önizlemelerde kolon bilgisi yoksa tüm kolonlar var sayılır.)
+  const hepsi = { segment: true, borcDurumu: true, city: true, phone: true, pazarlamaciEmail: true }
+  const satirlar = records.map((r) => {
+    const k = r.kolonlar ?? hepsi
+    const row: Record<string, unknown> = {
+      code_norm: r.codeNorm,
+      code_raw: r.codeRaw,
+      name: r.name,
+      is_auto_created: false,
+      updated_at: now,
+    }
+    if (k.segment) row.segment = r.segment || null
+    if (k.borcDurumu) row.borc_durumu = r.borcDurumu || null
+    if (k.city) row.city = r.city || null
+    if (k.phone) row.phone = r.phone || null
+    if (k.pazarlamaciEmail) row.pazarlamaci_email = r.pazarlamaciEmail || null
+    return row
+  })
+  // PostgREST tek istekte aynı kolon kümesini bekler → şekle göre grupla
+  const sekiller = new Map<string, Record<string, unknown>[]>()
+  for (const row of satirlar) {
+    const key = Object.keys(row).sort().join(',')
+    const arr = sekiller.get(key)
+    if (arr) arr.push(row)
+    else sekiller.set(key, [row])
+  }
   try {
-    await chunkedWrite(records, (chunk) =>
-      admin.from('firms').upsert(
-        chunk.map((r) => ({
-          code_norm: r.codeNorm,
-          code_raw: r.codeRaw,
-          name: r.name,
-          segment: r.segment || null,
-          borc_durumu: r.borcDurumu || null,
-          city: r.city || null,
-          phone: r.phone || null,
-          pazarlamaci_email: r.pazarlamaciEmail || null,
-          is_auto_created: false,
-          updated_at: now,
-        })),
-        { onConflict: 'code_norm' },
-      ),
-    )
+    for (const grup of sekiller.values()) {
+      await chunkedWrite(grup, (chunk) => admin.from('firms').upsert(chunk, { onConflict: 'code_norm' }))
+    }
   } catch (e) {
     return NextResponse.json({ error: 'Firmalar yazılamadı: ' + (e instanceof Error ? e.message : String(e)) }, { status: 500 })
   }

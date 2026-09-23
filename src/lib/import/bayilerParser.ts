@@ -14,6 +14,12 @@ export interface BayiRecord {
   city: string
   phone: string
   pazarlamaciEmail: string
+  /**
+   * Dosyada GERÇEKTEN bulunan isteğe bağlı kolonlar. Olmayan kolon mevcut
+   * firmada ASLA boşaltılmaz (ör. pazarlamaci_email kolonu olmayan bir dosya
+   * tüm pazarlamacı atamalarını silmemeli).
+   */
+  kolonlar: { segment: boolean; borcDurumu: boolean; city: boolean; phone: boolean; pazarlamaciEmail: boolean }
 }
 
 export interface ParsedBayiler {
@@ -50,6 +56,14 @@ export function parseBayilerXlsx(buf: Buffer | ArrayBuffer): ParsedBayiler {
   const iTel = col('TELEFON')
   const iEmail = col('PAZARLAMACI_EMAIL')
 
+  const kolonlar = {
+    segment: iSegment >= 0,
+    borcDurumu: iBorc >= 0,
+    city: iSehir >= 0,
+    phone: iTel >= 0,
+    pazarlamaciEmail: iEmail >= 0,
+  }
+
   const records: BayiRecord[] = []
   const invalids: ParsedBayiler['invalids'] = []
   const seen = new Set<string>()
@@ -82,9 +96,20 @@ export function parseBayilerXlsx(buf: Buffer | ArrayBuffer): ParsedBayiler {
       city: cellStr(iSehir >= 0 ? row[iSehir] : ''),
       phone: cellStr(iTel >= 0 ? row[iTel] : ''),
       pazarlamaciEmail: email,
+      kolonlar,
     })
   }
 
   if (records.length === 0) warnings.push('Hiç bayi satırı okunamadı.')
+  const eksik = [
+    !kolonlar.pazarlamaciEmail && 'pazarlamaci_email',
+    !kolonlar.segment && 'segment',
+    !kolonlar.city && 'sehir',
+    !kolonlar.phone && 'telefon',
+    !kolonlar.borcDurumu && 'borc_durumu',
+  ].filter(Boolean)
+  if (eksik.length > 0) {
+    warnings.push(`Dosyada olmayan kolonlar (${eksik.join(', ')}) mevcut firmalarda DEĞİŞTİRİLMEYECEK.`)
+  }
   return { records, invalids, warnings }
 }

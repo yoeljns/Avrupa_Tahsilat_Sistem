@@ -1,18 +1,80 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { fetchAll } from '@/lib/db'
-import type { MatrisSatiri } from '@/components/MonthMatrix'
+import { todayISO } from '@/lib/format'
 
-// Okuma sayfalarının ortak sorguları. Kullanıcı oturumlu istemciyle çağrılır —
-// RLS sayesinde pazarlamacı yalnız kendi firmalarının verisini görür.
+// Okuma sayfalarının verisi — her sayfa TEK ağ turu (0005_hiz_rls.sql).
+// Kullanıcı oturumlu istemciyle çağrılır: RLS sayesinde pazarlamacı yalnız
+// kendi firmalarının verisini görür. Toplama işleri veritabanında yapılır;
+// uygulamaya binlerce satır yerine hazır özet gelir.
 
-export async function currentRunId(supabase: SupabaseClient): Promise<string | null> {
-  const { data } = await supabase.from('v_current_run').select('run_id').maybeSingle()
-  return (data?.run_id as string | undefined) ?? null
+async function rpc<T>(supabase: SupabaseClient, fn: string, args?: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.rpc(fn, args ?? {})
+  if (error) {
+    const kod = (error as { code?: string }).code
+    throw new Error(`${fn}: ${error.message}${kod ? ` (${kod})` : ''}`)
+  }
+  return data as T
 }
 
-/** Firma bazlı bakiye (tek havuz modeli). */
+/** 'YYYY-MM' → ayın ilk ve son günü (ISO) */
+export function ayAraligi(ay: string): { bas: string; son: string } {
+  const [y, m] = ay.split('-').map(Number)
+  const sonGun = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  return { bas: `${ay}-01`, son: `${ay}-${String(sonGun).padStart(2, '0')}` }
+}
+
+// ---------------------------------------------------------------------------
+// Pano
+// ---------------------------------------------------------------------------
+export interface PanoOzeti {
+  run_id: string | null
+  kosu: {
+    started_at: string
+    finished_at: string | null
+    triggered_by: string | null
+    trigger_kind: string
+    stats: Record<string, unknown>
+  } | null
+  bakiye: {
+    pesin_acik: number
+    vadeli_acik: number
+    alacak: number
+    toplam_borc: number
+    toplam_odenen: number
+    borclu_firma: number
+  } | null
+  vade: { gecikmis: number; gun7: number; gun30: number } | null
+  inceleme: { adet: number; tutar: number } | null
+}
+
+export function panoOzeti(supabase: SupabaseClient, bugun = todayISO()): Promise<PanoOzeti> {
+  return rpc<PanoOzeti>(supabase, 'rpc_pano_ozeti', { p_bugun: bugun })
+}
+
+// ---------------------------------------------------------------------------
+// Firma listesi
+// ---------------------------------------------------------------------------
+export interface FirmaListeSatiri {
+  id: string
+  kod: string
+  ad: string
+  sehir: string | null
+  sorumlu: string | null
+  oto: boolean
+  pesin: number
+  vadeli: number
+  alacak: number
+  gecikmis: number
+  ilk_vade: string | null
+}
+
+export function firmaListesi(supabase: SupabaseClient, bugun = todayISO()): Promise<FirmaListeSatiri[]> {
+  return rpc<FirmaListeSatiri[]>(supabase, 'rpc_firma_listesi', { p_bugun: bugun }).then((r) => r ?? [])
+}
+
+// ---------------------------------------------------------------------------
+// Firma detayı
+// ---------------------------------------------------------------------------
 export interface BalanceRow {
-  firm_id: string
   pesin_open_eur_cents: number
   vadeli_open_eur_cents: number
   vadeli_overdue_eur_cents: number
@@ -22,118 +84,186 @@ export interface BalanceRow {
   total_paid_eur_cents: number
 }
 
-export async function balancesAtRun(supabase: SupabaseClient, runId: string): Promise<BalanceRow[]> {
-  return fetchAll<BalanceRow>((from, to) =>
-    supabase
-      .from('firm_balances')
-      .select(
-        'firm_id, pesin_open_eur_cents, vadeli_open_eur_cents, vadeli_overdue_eur_cents, credit_eur_cents, next_due_date, total_debt_eur_cents, total_paid_eur_cents',
-      )
-      .eq('run_id', runId)
-      .order('firm_id')
-      .range(from, to),
-  )
-}
-
-export interface FirmRow {
+export interface FirmaDetayIrsaliye {
   id: string
-  code_norm: string
-  code_raw: string
-  name: string
-  segment: string | null
-  city: string | null
-  pazarlamaci_email: string | null
-  is_auto_created: boolean
+  fis_no: string
+  invoice_date: string
+  belge_no_raw: string
+  odeme_plani_raw: string
+  plan_override_note: string | null
+  sale_type: string
+  sale_type_auto: string
+  sale_type_override: string | null
+  suggested_sale_type: string | null
+  amount_eur_cents: number | null
+  amount_eur_cents_override: number | null
+  amount_tl: number | null
+  plan_parse_status: string
+  plan_parse_note: string | null
+  is_31_12: boolean
+  is_cancelled: boolean
+  cancel_reason: string | null
+  excluded_override: boolean | null
+  is_excluded_firm: boolean
+  is_allocatable: boolean
+  needs_review: boolean
+  raw_changed_after_override: boolean
+  is_iade: boolean
+  turu_raw: string
 }
 
-export async function allFirms(supabase: SupabaseClient): Promise<FirmRow[]> {
-  return fetchAll<FirmRow>((from, to) =>
-    supabase
-      .from('firms')
-      .select('id, code_norm, code_raw, name, segment, city, pazarlamaci_email, is_auto_created')
-      .order('code_norm')
-      .range(from, to),
-  )
+export interface FirmaDetayTaksit {
+  id: string
+  invoice_id: string
+  seq: number
+  side: string
+  due_date: string
+  amount_eur_cents: number
+  remaining_eur_cents: number | null
+  source: string
+  no_date_flag: boolean
 }
 
-/** Kapsam içi taksit — tam ödenmişler DAHİL (BORÇ/ÖDEME/KALAN görünümü için). */
-export interface ScopeInstallmentRow {
+export interface FirmaDetayOdeme {
+  id: string
+  islem_kodu: string
+  sheet_side: string
+  islem_tarihi: string | null
+  gelen_tl: number | null
+  doviz_eur_cents: number | null
+  kur: number | null
+  aciklama: string | null
+  kayit_durumu: string | null
+  is_alc: boolean
+  is_kdv: boolean
+  allocatable: boolean
+}
+
+export interface FirmaDetayTahsis {
+  payment_id: string
   installment_id: string
   invoice_id: string
+  amount_eur_cents: number
+}
+
+export interface FirmaDetay {
+  firma: {
+    id: string
+    code_norm: string
+    code_raw: string
+    name: string
+    segment: string | null
+    city: string | null
+    phone: string | null
+    pazarlamaci_email: string | null
+    is_auto_created: boolean
+  }
+  run_id: string | null
+  bakiye: BalanceRow | null
+  irsaliyeler: FirmaDetayIrsaliye[]
+  taksitler: FirmaDetayTaksit[]
+  odemeler: FirmaDetayOdeme[]
+  tahsisler: FirmaDetayTahsis[]
+}
+
+/** Firma görünmüyorsa (yok ya da yetki dışı) null. */
+export function firmaDetay(supabase: SupabaseClient, firmId: string): Promise<FirmaDetay | null> {
+  return rpc<FirmaDetay | null>(supabase, 'rpc_firma_detay', { p_firm_id: firmId })
+}
+
+// ---------------------------------------------------------------------------
+// Takvim matrisi (Konsinye / Peşin)
+// ---------------------------------------------------------------------------
+export interface MatrisFirma {
+  firm_id: string
+  kod: string
+  ad: string
+  sorumlu: string | null
+  toplam_borc: number
+  toplam_odeme: number
+  toplam_kalan: number
+  once_kalan: number
+  sonra_kalan: number
+  tarihsiz: boolean
+  /** vade günü (ISO) → [borç, ödeme, kalan] — yalnız seçili ay */
+  gunler: Record<string, [number, number, number]>
+}
+
+export interface MatrisAy {
+  run_id: string | null
+  ozet: {
+    toplam_borc: number
+    toplam_odenen: number
+    toplam_kalan: number
+    gecikmis: number
+    tarihsiz_adet: number
+    yas_0_30: number
+    yas_31_60: number
+    yas_61_90: number
+    yas_90p: number
+  } | null
+  /** Verisi olan aylar ('YYYY-MM') — ay seçici için */
+  aylar: string[]
+  firmalar: MatrisFirma[]
+}
+
+export function matrisAy(
+  supabase: SupabaseClient,
+  side: 'PESIN' | 'VADELI',
+  ay: string,
+  bugun = todayISO(),
+): Promise<MatrisAy> {
+  const { bas, son } = ayAraligi(ay)
+  return rpc<MatrisAy>(supabase, 'rpc_matris_ay', { p_side: side, p_ay_bas: bas, p_ay_son: son, p_bugun: bugun })
+}
+
+// ---------------------------------------------------------------------------
+// İnceleme kuyruğu
+// ---------------------------------------------------------------------------
+export interface IncelemeIrsaliye {
+  id: string
+  fis_no: string
   firm_id: string
   firm_code: string
   firm_name: string
-  side: 'PESIN' | 'VADELI'
-  seq: number
-  due_date: string
   invoice_date: string
+  belge_no_raw: string
+  odeme_plani_raw: string
+  plan_override_note: string | null
+  amount_eur_cents: number | null
+  sale_type: string
+  suggested_sale_type: string | null
+  classify_reason: string | null
+  plan_parse_status: string
+  plan_parse_note: string | null
+  is_31_12: boolean
+  is_cancelled: boolean
+  is_excluded_firm: boolean
+  excluded_override: boolean | null
+  fisno_nonstandard: boolean
+  needs_review: boolean
+  raw_changed_after_override: boolean
+  is_iade: boolean
+  turu_raw: string
+  sale_type_override: string | null
+  is_allocatable: boolean
+}
+
+export interface IncelemeTarihsiz {
+  installment_id: string
+  firm_id: string
+  firm_code: string
+  firm_name: string
   fis_no: string
-  amount_eur_cents: number
+  due_date: string
   remaining_eur_cents: number
-  paid_eur_cents: number
-  no_date_flag: boolean
-  source: string
 }
 
-export async function scopeInstallments(
-  supabase: SupabaseClient,
-  side?: 'PESIN' | 'VADELI',
-): Promise<ScopeInstallmentRow[]> {
-  return fetchAll<ScopeInstallmentRow>((from, to) => {
-    let q = supabase
-      .from('v_installments_scope')
-      .select(
-        'installment_id, invoice_id, firm_id, firm_code, firm_name, side, seq, due_date, invoice_date, fis_no, amount_eur_cents, remaining_eur_cents, paid_eur_cents, no_date_flag, source',
-      )
-    if (side) q = q.eq('side', side)
-    return q.order('due_date').order('firm_code').order('installment_id').range(from, to)
-  })
+export interface IncelemeVerisi {
+  irsaliyeler: IncelemeIrsaliye[]
+  tarihsiz: IncelemeTarihsiz[]
 }
 
-/** Hariç tutulan firma kodları kümesi (görünümlerden gizlemek için). */
-export async function excludedCodeSet(supabase: SupabaseClient): Promise<Set<string>> {
-  const rows = await fetchAll<{ code_norm: string }>((from, to) =>
-    supabase.from('excluded_firm_codes').select('code_norm').order('code_norm').range(from, to),
-  )
-  return new Set(rows.map((r) => r.code_norm))
-}
-
-/** Firma id → pazarlamacı e-postasının kullanıcı adı kısmı (SORUMLU sütunu). */
-export async function pazarlamaciByFirm(supabase: SupabaseClient): Promise<Map<string, string>> {
-  const firms = await allFirms(supabase)
-  const map = new Map<string, string>()
-  for (const f of firms) {
-    if (f.pazarlamaci_email) map.set(f.id, f.pazarlamaci_email.split('@')[0].toUpperCase())
-  }
-  return map
-}
-
-/**
- * Matris sayfalarının (konsinye / peşin) TÜM verisi TEK ağ turunda.
- *
- * Eskiden: currentRunId (1 tur) + scopeInstallments (1000'lik sayfalama ile
- * N ARDIŞIK tur) + pazarlamaciByFirm → allFirms (M tur). Uygulama ile
- * veritabanı arası her tur gecikme ekliyordu; sayfa geçişi saniyelere çıkıyordu.
- * Artık rpc_matris_verisi hepsini tek yanıtta döndürür (RLS aynen işler).
- * RPC yoksa eski çok turlu yola düşülür — migration sırası kimseyi kilitlemez.
- */
-export async function matrisVerisi(
-  supabase: SupabaseClient,
-  side: 'PESIN' | 'VADELI',
-): Promise<{ runId: string | null; rows: MatrisSatiri[]; sorumlu: Map<string, string> }> {
-  const { data, error } = await supabase.rpc('rpc_matris_verisi', { p_side: side })
-  if (!error && data) {
-    const d = data as { run_id: string | null; rows: MatrisSatiri[]; sorumlu: Record<string, string> }
-    return {
-      runId: d.run_id ?? null,
-      rows: d.rows ?? [],
-      sorumlu: new Map(Object.entries(d.sorumlu ?? {})),
-    }
-  }
-
-  // geri düşüş (RPC kurulmadan önce): eski çok turlu yol
-  const runId = await currentRunId(supabase)
-  if (!runId) return { runId: null, rows: [], sorumlu: new Map() }
-  const [rows, sorumlu] = await Promise.all([scopeInstallments(supabase, side), pazarlamaciByFirm(supabase)])
-  return { runId, rows, sorumlu }
+export function incelemeVerisi(supabase: SupabaseClient): Promise<IncelemeVerisi> {
+  return rpc<IncelemeVerisi>(supabase, 'rpc_inceleme')
 }

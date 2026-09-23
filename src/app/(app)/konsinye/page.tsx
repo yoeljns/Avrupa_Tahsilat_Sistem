@@ -3,8 +3,7 @@ import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationN
 import MonthMatrix from '@/components/MonthMatrix'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { addMonths, eur, monthOf, todayISO, trMonth } from '@/lib/format'
-import { matrisVerisi } from '@/lib/queries'
-import type { MatrisSatiri } from '@/components/MonthMatrix'
+import { matrisAy, type MatrisAy } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -16,23 +15,15 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
   const params = await searchParams
   const month = /^\d{4}-\d{2}$/.test(params.ay ?? '') ? params.ay! : monthOf(todayISO())
 
-  // TEK ağ turu: koşu + taksitler + sorumlu eşlemesi
-  let rows: MatrisSatiri[] = []
-  let sorumlu = new Map<string, string>()
+  // TEK ağ turu: ay matrisi veritabanında toplanmış olarak gelir
+  let veri: MatrisAy
   try {
-    const veri = await matrisVerisi(supabase, 'VADELI')
-    rows = veri.rows
-    sorumlu = veri.sorumlu
+    veri = await matrisAy(supabase, 'VADELI', month)
   } catch (e) {
     if (isMissingRelationError(e)) return <MigrationNeeded />
     throw e
   }
-
-  const today = todayISO()
-  const totalKalan = rows.reduce((s, r) => s + r.remaining_eur_cents, 0)
-  const totalOdenen = rows.reduce((s, r) => s + r.paid_eur_cents, 0)
-  const overdue = rows.filter((r) => r.due_date < today).reduce((s, r) => s + r.remaining_eur_cents, 0)
-  const noDateCount = rows.filter((r) => r.no_date_flag && r.remaining_eur_cents > 0).length
+  const o = veri.ozet
 
   return (
     <div>
@@ -40,16 +31,16 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
         <div>
           <h1 className="text-lg font-bold text-slate-900">Konsinye / Konsinye Peşin</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Ödenen: <strong className="tabular-nums text-emerald-600">{eur(totalOdenen)}</strong>
-            {' '}· Kalan borç: <strong className="tabular-nums">{eur(totalKalan)}</strong>
-            {overdue > 0 && (
+            Ödenen: <strong className="tabular-nums text-emerald-600">{eur(o?.toplam_odenen ?? 0)}</strong>
+            {' '}· Kalan borç: <strong className="tabular-nums">{eur(o?.toplam_kalan ?? 0)}</strong>
+            {(o?.gecikmis ?? 0) > 0 && (
               <>
-                {' '}· vadesi geçmiş: <strong className="tabular-nums text-red-600">{eur(overdue)}</strong>
+                {' '}· vadesi geçmiş: <strong className="tabular-nums text-red-600">{eur(o!.gecikmis)}</strong>
               </>
             )}
-            {noDateCount > 0 && (
+            {(o?.tarihsiz_adet ?? 0) > 0 && (
               <span className="ml-2 text-amber-600" title="Vade tarihi girilmemiş taksitler irsaliye tarihiyle listelenir">
-                † {noDateCount} taksitte tarih girilmedi
+                † {o!.tarihsiz_adet} taksitte tarih girilmedi
               </span>
             )}
           </p>
@@ -76,7 +67,7 @@ export default async function KonsinyePage({ searchParams }: { searchParams: Pro
       </div>
 
       <div className="mt-4">
-        <MonthMatrix rows={rows} month={month} sorumluByFirm={sorumlu} />
+        <MonthMatrix firmalar={veri.firmalar} />
       </div>
     </div>
   )

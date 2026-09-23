@@ -55,12 +55,14 @@ export async function POST(request: Request) {
     const ex = existing.get(rec.codeNorm)
     const changed: string[] = []
     if (ex) {
+      // Dosyada olmayan kolonlar kıyaslanmaz (commit de onlara dokunmaz)
+      const k = rec.kolonlar
       if ((ex.name ?? '') !== rec.name) changed.push('ad')
-      if ((ex.segment ?? '') !== rec.segment) changed.push('segment')
-      if ((ex.city ?? '') !== rec.city) changed.push('sehir')
-      if ((ex.phone ?? '') !== rec.phone) changed.push('telefon')
-      if (((ex.pazarlamaci_email ?? '').toLowerCase()) !== rec.pazarlamaciEmail) changed.push('pazarlamaci')
-      if ((ex.borc_durumu ?? '') !== rec.borcDurumu) changed.push('borc_durumu')
+      if (k.segment && (ex.segment ?? '') !== rec.segment) changed.push('segment')
+      if (k.city && (ex.city ?? '') !== rec.city) changed.push('sehir')
+      if (k.phone && (ex.phone ?? '') !== rec.phone) changed.push('telefon')
+      if (k.pazarlamaciEmail && (ex.pazarlamaci_email ?? '').toLowerCase() !== rec.pazarlamaciEmail) changed.push('pazarlamaci')
+      if (k.borcDurumu && (ex.borc_durumu ?? '') !== rec.borcDurumu) changed.push('borc_durumu')
     }
     const status = !ex ? 'new' : changed.length > 0 ? 'updated' : 'unchanged'
     counts[status] = (counts[status] ?? 0) + 1
@@ -94,6 +96,12 @@ export async function POST(request: Request) {
     counts,
     total: parsed.records.length + parsed.invalids.length,
     warnings: parsed.warnings,
-    samples: { invalid: parsed.invalids.slice(0, 20) },
+    samples: {
+      invalid: parsed.invalids.slice(0, 20),
+      updated: stagedRows
+        .filter((r) => r.diff_status === 'updated')
+        .slice(0, 20)
+        .map((r) => ({ key: r.natural_key as string, fields: r.changed_fields as string[] })),
+    },
   })
 }

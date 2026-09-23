@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { apiSession } from '@/lib/auth'
 import { auditInvoiceChange, loadInvoiceForOps, refreshInstallmentSides, regenerateInstallments } from '@/lib/invoiceOps'
-import { runRecompute } from '@/lib/recompute'
+import { recomputeFirms } from '@/lib/recompute'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 
 export const runtime = 'nodejs'
@@ -31,6 +31,7 @@ export async function POST(request: Request) {
 
   const admin = createAdminSupabase()
   let applied = 0
+  const etkilenenFirmalar = new Set<string>()
 
   for (const item of parsed.data.items) {
     const inv = await loadInvoiceForOps(admin, item.invoiceId)
@@ -54,11 +55,13 @@ export async function POST(request: Request) {
     await auditInvoiceChange(admin, session.email, inv, [
       { action: 'SINIFLANDIRMA', field: 'satis_tipi', oldValue: oldType, newValue: item.saleType },
     ])
+    etkilenenFirmalar.add(inv.firm_id)
     applied++
   }
 
   if (applied === 0) return NextResponse.json({ error: 'Hiçbir kayıt güncellenemedi.' }, { status: 400 })
 
-  const recompute = await runRecompute(admin, 'edit', session.email)
-  return NextResponse.json({ ok: true, applied, recompute: { runId: recompute.runId } })
+  // Yalnız sınıflandırılan irsaliyelerin firmaları yeniden hesaplanır
+  const recompute = await recomputeFirms(admin, Array.from(etkilenenFirmalar), session.email)
+  return NextResponse.json({ ok: true, applied, recompute })
 }

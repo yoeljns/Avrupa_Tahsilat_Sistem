@@ -3,22 +3,34 @@ import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationN
 import RecomputeButton from '@/components/RecomputeButton'
 import StatCard from '@/components/StatCard'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
-import { fetchAll } from '@/lib/db'
-import { eur, todayISO, trDateTime } from '@/lib/format'
-import { balancesAtRun, currentRunId, scopeInstallments } from '@/lib/queries'
+import { eur, trDateTime } from '@/lib/format'
+import { panoOzeti, type PanoOzeti } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
-import { addDaysISO } from '@/lib/engine/dates'
 
 export const dynamic = 'force-dynamic'
+
+const TETIK_ADLARI: Record<string, string> = {
+  import: 'içe aktarma',
+  edit: 'düzenleme',
+  manual: 'elle',
+  setup: 'kurulum',
+}
 
 export default async function DashboardPage() {
   const session = (await getSessionProfile())!
   const staff = isStaffRole(session.role)
   const supabase = await createServerSupabase()
 
-  const runId = await currentRunId(supabase)
+  // TEK ağ turu: bakiyeler, vade pencereleri (bugüne göre canlı) ve inceleme sayısı
+  let ozet: PanoOzeti
+  try {
+    ozet = await panoOzeti(supabase)
+  } catch (e) {
+    if (isMissingRelationError(e)) return <MigrationNeeded />
+    throw e
+  }
 
-  if (!runId) {
+  if (!ozet.run_id) {
     return (
       <div>
         <h1 className="text-lg font-bold text-slate-900">Pano</h1>
@@ -40,67 +52,23 @@ export default async function DashboardPage() {
     )
   }
 
-  let balances: Awaited<ReturnType<typeof balancesAtRun>>
-  let vadeli: Awaited<ReturnType<typeof scopeInstallments>>
-  let runInfo: { data: { started_at: string; triggered_by: string | null } | null }
-  try {
-    ;[balances, vadeli, runInfo] = await Promise.all([
-      balancesAtRun(supabase, runId),
-      scopeInstallments(supabase, 'VADELI'),
-      supabase.from('recon_runs').select('started_at, triggered_by').eq('id', runId).maybeSingle(),
-    ])
-  } catch (e) {
-    if (isMissingRelationError(e)) return <MigrationNeeded />
-    throw e
-  }
-
-  const pesinOpen = balances.reduce((s, b) => s + b.pesin_open_eur_cents, 0)
-  const vadeliOpen = balances.reduce((s, b) => s + b.vadeli_open_eur_cents, 0)
-  const overdue = balances.reduce((s, b) => s + b.vadeli_overdue_eur_cents, 0)
-  const credit = balances.reduce((s, b) => s + b.credit_eur_cents, 0)
-  const totalPaid = balances.reduce((s, b) => s + b.total_paid_eur_cents, 0)
-
-  const today = todayISO()
-  const in7 = addDaysISO(today, 7)
-  const in30 = addDaysISO(today, 30)
-  const upcoming7 = vadeli
-    .filter((r) => r.due_date >= today && r.due_date <= in7)
-    .reduce((s, r) => s + r.remaining_eur_cents, 0)
-  const upcoming30 = vadeli
-    .filter((r) => r.due_date >= today && r.due_date <= in30)
-    .reduce((s, r) => s + r.remaining_eur_cents, 0)
-
-  // İnceleme bekleyenler (staff kartı) — takip dışı firmalar sayılmaz
-  let reviewCount = 0
-  let reviewSum = 0
-  if (staff) {
-    const reviewRows = await fetchAll<{
-      amount_eur_cents: number | null
-      is_excluded_firm: boolean
-      excluded_override: boolean | null
-    }>((from, to) =>
-      supabase
-        .from('v_invoices_effective')
-        .select('amount_eur_cents, is_excluded_firm, excluded_override')
-        .eq('needs_review', true)
-        .eq('is_31_12', false)
-        .eq('is_cancelled', false)
-        .order('id')
-        .range(from, to),
-    )
-    const visible = reviewRows.filter((r) => !(r.excluded_override ?? r.is_excluded_firm))
-    reviewCount = visible.length
-    reviewSum = visible.reduce((s, r) => s + (r.amount_eur_cents ?? 0), 0)
-  }
+  const b = ozet.bakiye
+  const v = ozet.vade
+  const reviewCount = ozet.inceleme?.adet ?? 0
+  const reviewSum = ozet.inceleme?.tutar ?? 0
+  const sonGuncelleme = (ozet.kosu?.stats?.son_firma_guncelleme as string | undefined) ?? ozet.kosu?.finished_at ?? ozet.kosu?.started_at
 
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-bold text-slate-900">Pano</h1>
         <div className="flex items-center gap-3 text-xs text-slate-500">
-          <span>
-            Son mutabakat: {trDateTime(runInfo.data?.started_at)} ({runInfo.data?.triggered_by ?? '—'})
-          </span>
+          {ozet.kosu && (
+            <span>
+              Son hesap: {trDateTime(sonGuncelleme)} · tam hesap {trDateTime(ozet.kosu.started_at)} (
+              {TETIK_ADLARI[ozet.kosu.trigger_kind] ?? ozet.kosu.trigger_kind}, {ozet.kosu.triggered_by ?? '—'})
+            </span>
+          )}
           {staff && (
             <>
               <a href="/api/export/borclar" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
@@ -116,22 +84,22 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Konsinye Açık Borç" value={eur(vadeliOpen)} sub="Konsinye + Konsinye Peşin" />
-        <StatCard title="Peşin Açık Borç" value={eur(pesinOpen)} />
+        <StatCard title="Konsinye Açık Borç" value={eur(b?.vadeli_acik ?? 0)} sub="Konsinye + Konsinye Peşin" />
+        <StatCard title="Peşin Açık Borç" value={eur(b?.pesin_acik ?? 0)} />
         <StatCard
           title="Vadesi Geçmiş (Konsinye)"
-          value={eur(overdue)}
-          tone={overdue > 0 ? 'red' : 'default'}
+          value={eur(v?.gecikmis ?? 0)}
+          tone={(v?.gecikmis ?? 0) > 0 ? 'red' : 'default'}
         />
         <StatCard
           title="Alacak Bakiyesi"
-          value={eur(credit)}
+          value={eur(b?.alacak ?? 0)}
           sub="Fazla ödemeler — sonraki borçtan düşülür"
           tone="green"
         />
-        <StatCard title="7 Gün İçinde Vadesi Gelen" value={eur(upcoming7)} tone={upcoming7 > 0 ? 'amber' : 'default'} />
-        <StatCard title="30 Gün İçinde Vadesi Gelen" value={eur(upcoming30)} />
-        <StatCard title="Toplam Tahsilat" value={eur(totalPaid)} sub="Tahsise giren ödemeler (eşleşen KDV 1/5 dahil)" />
+        <StatCard title="7 Gün İçinde Vadesi Gelen" value={eur(v?.gun7 ?? 0)} tone={(v?.gun7 ?? 0) > 0 ? 'amber' : 'default'} />
+        <StatCard title="30 Gün İçinde Vadesi Gelen" value={eur(v?.gun30 ?? 0)} />
+        <StatCard title="Toplam Tahsilat" value={eur(b?.toplam_odenen ?? 0)} sub="Tahsise giren ödemeler (eşleşen KDV 1/5 dahil)" />
         {staff && (
           <Link href="/inceleme" className="block">
             <StatCard

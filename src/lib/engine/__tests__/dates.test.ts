@@ -52,3 +52,35 @@ describe('takvim yardımcıları', () => {
     expect(addDaysISO('2026-12-15', 30)).toBe('2027-01-14')
   })
 })
+
+import { isValidISODate } from '../dates'
+import { todayISO, trDateTime } from '@/lib/format'
+import { cellTimestamp } from '@/lib/import/odemelerParser'
+
+describe('gerçek takvim günü kontrolü', () => {
+  it("'2026-02-30' geçersiz, '2028-02-29' (artık yıl) geçerli", () => {
+    expect(isValidISODate('2026-02-30')).toBe(false)
+    expect(isValidISODate('2026-13-01')).toBe(false)
+    expect(isValidISODate('2028-02-29')).toBe(true)
+    expect(isValidISODate('2026-02-28')).toBe(true)
+  })
+})
+
+describe('Türkiye saati', () => {
+  it('UTC 22:30 = İstanbul ertesi gün 01:30 → bugün ertesi gün', () => {
+    expect(todayISO(new Date('2026-09-22T22:30:00Z'))).toBe('2026-09-23')
+    expect(todayISO(new Date('2026-09-22T20:59:00Z'))).toBe('2026-09-22')
+  })
+  it('saatler İstanbul saatiyle gösterilir', () => {
+    expect(trDateTime('2026-09-23T09:05:08Z')).toBe('23.09.2026 12:05')
+  })
+})
+
+describe('ödeme dosyasındaki metin tarihler', () => {
+  it("'05.01.2026' 5 Ocak'tır (ay-önce okunup 1 Mayıs olmaz)", () => {
+    expect(cellTimestamp('05.01.2026')).toBe('2026-01-05T00:00:00.000Z')
+    expect(cellTimestamp('13.01.2026')).toBe('2026-01-13T00:00:00.000Z')
+    expect(cellTimestamp('2026-01-05 00:00:00')).toBe('2026-01-05T00:00:00.000Z')
+    expect(cellTimestamp('32.01.2026')).toBeNull()
+  })
+})
