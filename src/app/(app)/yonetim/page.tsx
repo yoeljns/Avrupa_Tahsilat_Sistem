@@ -25,6 +25,7 @@ import { isAdminRole, requireRole } from '@/lib/auth'
 import { alanEtiketi, islemEtiketi, kayitYazisi } from '@/lib/denetimEtiketleri'
 import { eur, trDateTime } from '@/lib/format'
 import { DAVRANISLAR, davranisOf } from '@/lib/kategoriMeta'
+import { tetikAdi } from '@/lib/kosuEtiketleri'
 import { yonetimOzeti, type YonetimOzeti } from '@/lib/queries'
 import { renkOf } from '@/lib/renkler'
 import { createServerSupabase } from '@/lib/supabase/server'
@@ -35,7 +36,6 @@ export const dynamic = 'force-dynamic'
 // Yönetim → Genel Bakış: sistemin anlık durumu tek bakışta (tek ağ turu: rpc_yonetim_ozeti).
 // Sorun gösteren her satır, düzeltileceği sayfaya götürür.
 
-const TETIK: Record<string, string> = { import: 'içe aktarma', edit: 'düzenleme', manual: 'elle', setup: 'kurulum' }
 const AKTARIM_TURU: Record<string, string> = { irsaliye: 'İrsaliye', odemeler: 'Ödemeler', bayiler: 'Bayi listesi' }
 const AKTARIM_DURUMU: Record<string, { ad: string; ton: 'green' | 'amber' | 'gray' }> = {
   committed: { ad: 'Uygulandı', ton: 'green' },
@@ -65,6 +65,15 @@ function saglikListesi(o: YonetimOzeti): SaglikOgesi[] {
       aciklama: 'Kategorisi belli olmadığı için borç hesabına girmiyor. Kuralla toplu ya da İnceleme’den tek tek atanabilir.',
       href: '/yonetim/kurallar',
       eylem: 'Kurallara git',
+      ciddi: true,
+    },
+    {
+      ad: 'EUR tutarı olmayan ödeme',
+      sayi: o.odeme_eur_eksik?.adet ?? 0,
+      ek: (o.odeme_eur_eksik?.adet ?? 0) > 0 ? `${Number(o.odeme_eur_eksik?.gelen_tl ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })} TL` : undefined,
+      aciklama: 'Dosyada DÖVİZ EURO boş olduğu için hiçbir borca yazılmıyor. EUR tutarı İnceleme’den girilince firma hemen yeniden hesaplanır.',
+      href: '/inceleme?sekme=odeme',
+      eylem: 'Tutar gir',
       ciddi: true,
     },
     { ad: 'İnceleme bekleyen irsaliye', sayi: s.inceleme, aciklama: 'Onay ya da düzeltme bekleyen kayıtlar.', href: '/inceleme', eylem: 'İncelemeye git' },
@@ -172,7 +181,7 @@ export default async function YonetimGenelBakis() {
           ikon={<Activity className="h-4 w-4" />}
           baslik="Son tam hesap"
           deger={kosu ? trDateTime(kosu.started_at) : '—'}
-          alt={kosu ? `${TETIK[kosu.trigger_kind] ?? kosu.trigger_kind} · ${kosu.triggered_by ?? '—'}` : 'Henüz hesap yapılmadı'}
+          alt={kosu ? `${tetikAdi(kosu.trigger_kind)} · ${kosu.triggered_by ?? '—'}` : 'Henüz hesap yapılmadı'}
           kucukDeger
         />
         <OzetKutusu

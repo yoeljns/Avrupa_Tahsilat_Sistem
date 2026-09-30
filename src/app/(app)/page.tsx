@@ -4,18 +4,12 @@ import RecomputeButton from '@/components/RecomputeButton'
 import StatCard from '@/components/StatCard'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { eur, trDateTime } from '@/lib/format'
+import { tetikAdi } from '@/lib/kosuEtiketleri'
 import { panoOzeti, type PanoOzeti } from '@/lib/queries'
 import { renkOf } from '@/lib/renkler'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
-
-const TETIK_ADLARI: Record<string, string> = {
-  import: 'içe aktarma',
-  edit: 'düzenleme',
-  manual: 'elle',
-  setup: 'kurulum',
-}
 
 export default async function DashboardPage() {
   const session = (await getSessionProfile())!
@@ -77,7 +71,7 @@ export default async function DashboardPage() {
           {ozet.kosu && (
             <span>
               Son hesap: {trDateTime(sonGuncelleme)} · tam hesap {trDateTime(ozet.kosu.started_at)} (
-              {TETIK_ADLARI[ozet.kosu.trigger_kind] ?? ozet.kosu.trigger_kind}, {ozet.kosu.triggered_by ?? '—'})
+              {tetikAdi(ozet.kosu.trigger_kind)}, {ozet.kosu.triggered_by ?? '—'})
             </span>
           )}
           {staff && (
@@ -108,8 +102,9 @@ export default async function DashboardPage() {
           sub="Fazla ödemeler — sonraki borçtan düşülür"
           tone="green"
         />
-        <StatCard title="7 Gün İçinde Vadesi Gelen" value={eur(v?.gun7 ?? 0)} tone={(v?.gun7 ?? 0) > 0 ? 'amber' : 'default'} />
-        <StatCard title="30 Gün İçinde Vadesi Gelen" value={eur(v?.gun30 ?? 0)} />
+        {/* Takvimle aynı tanım: bugün dahil 7 / 30 gün (0008 öncesi Pano 8 / 31 gün sayıyordu) */}
+        <StatCard title="7 Gün İçinde Vadesi Gelen" value={eur(v?.gun7 ?? 0)} sub="Konsinye · bugün dahil" tone={(v?.gun7 ?? 0) > 0 ? 'amber' : 'default'} />
+        <StatCard title="30 Gün İçinde Vadesi Gelen" value={eur(v?.gun30 ?? 0)} sub="Konsinye · bugün dahil" />
         <StatCard title="Toplam Tahsilat" value={eur(b?.toplam_odenen ?? 0)} sub="Tahsise giren ödemeler (eşleşen KDV 1/5 dahil)" />
         {staff && (
           <Link href="/inceleme" className="block">

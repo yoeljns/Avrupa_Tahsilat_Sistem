@@ -4,8 +4,10 @@ import { chunkedWrite, fetchAll, writeAudit, type AuditEntry } from '@/lib/db'
 import { runRecompute } from '@/lib/recompute'
 import { stripCodeSuffix, type OdemeRecord } from './odemelerParser'
 
-// Staged ödeme batch'ini uygular. Ödemelerde override yoktur; tüm sütunlar
-// ham veridir ve islem_kodu ile idempotent upsert edilir.
+// Staged ödeme batch'ini uygular. Yazılan tüm sütunlar ham veridir ve islem_kodu
+// ile idempotent upsert edilir. Tek override — yönetimin elle girdiği EUR
+// (doviz_eur_cents_override, 0008) — burada HİÇ yazılmaz; upsert'te olmayan kolon
+// korunduğu için elle girilen tutar yeniden yüklemede kaybolmaz.
 
 export interface OdemeCommitStats {
   inserted: number

@@ -30,9 +30,16 @@ export interface GirdiOdeme {
   firm_id: string
   islem_tarihi: string | null
   doviz_eur_cents: number | null
+  /** Yönetimin elle girdiği EUR (0008); varsa dosyadaki tutarın önüne geçer */
+  doviz_eur_cents_override?: number | null
   is_kdv: boolean | null
   kdv_fatura_referansi: string | null
   aciklama: string | null
+}
+
+/** Ödemenin hesapta kullanılan tutarı: elle girilen EUR, yoksa dosyadaki DÖVİZ EURO. */
+export function odemeEtkinTutar(p: Pick<GirdiOdeme, 'doviz_eur_cents' | 'doviz_eur_cents_override'>): number | null {
+  return p.doviz_eur_cents_override ?? p.doviz_eur_cents
 }
 
 export interface MotorGirdisi {
@@ -127,7 +134,9 @@ export function motorGirdisiKur(
   let kdvEslesmeyen = 0
   for (const p of odemeler) {
     if (haricFirmaIds.has(p.firm_id)) continue
-    if (!p.doviz_eur_cents || p.doviz_eur_cents <= 0) continue
+    const tutar = odemeEtkinTutar(p)
+    // EUR'suz ödeme hesaba giremez; İnceleme → Ödeme Tutarı'nda listelenir ve elle girilebilir
+    if (!tutar || tutar <= 0) continue
     if (p.is_kdv) {
       const hedefler = kdvHedefleri(p.firm_id, parseKdvRefs(p.kdv_fatura_referansi, p.aciklama))
       if (!hedefler) {
@@ -140,7 +149,7 @@ export function motorGirdisiKur(
         islemKodu: p.islem_kodu,
         firmId: p.firm_id,
         dateISO: p.islem_tarihi ?? TARIHSIZ,
-        amountCents: p.doviz_eur_cents,
+        amountCents: tutar,
         isKdv: true,
         targetInvoiceIds: hedefler,
       })
@@ -151,7 +160,7 @@ export function motorGirdisiKur(
       islemKodu: p.islem_kodu,
       firmId: p.firm_id,
       dateISO: p.islem_tarihi ?? TARIHSIZ,
-      amountCents: p.doviz_eur_cents,
+      amountCents: tutar,
     })
   }
 

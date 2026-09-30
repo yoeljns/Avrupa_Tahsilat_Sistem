@@ -409,14 +409,31 @@ export default async function FirmaDetayPage({
               {payments.map((p) => {
                 const allocs = allocByPayment.get(p.id) ?? []
                 const allocated = allocs.reduce((s, a) => s + a.amount_eur_cents, 0)
-                const unmatched = p.allocatable && p.doviz_eur_cents ? p.doviz_eur_cents - allocated : 0
+                // Hesapta kullanılan tutar: elle girilen EUR, yoksa dosyadaki DÖVİZ EURO
+                const etkin = p.doviz_eur_cents_override ?? p.doviz_eur_cents
+                const eurYok = p.allocatable && (etkin === null || etkin <= 0)
+                const unmatched = p.allocatable && etkin && etkin > 0 ? etkin - allocated : 0
                 const kdvEslesti = allocs.length > 0
                 return (
                   <tr key={p.id} className={'border-b border-slate-100 ' + (!p.allocatable ? 'opacity-60' : '')}>
                     <td className="px-3 py-2 font-medium">
                       {p.islem_kodu}
                       {p.is_alc && <span className="ml-1 rounded bg-slate-200 px-1 text-xs text-slate-600" title="Eski sistemin alacak kaydı — tahsise girmez">ALC</span>}
-                      {p.is_kdv && (
+                      {eurYok &&
+                        (staff ? (
+                          <Link
+                            href="/inceleme?sekme=odeme"
+                            className="ml-1 rounded bg-red-100 px-1 text-xs text-red-700 hover:underline"
+                            title="DÖVİZ EURO boş — ödeme hesaba girmedi. İnceleme → Ödeme Tutarı'ndan EUR girin."
+                          >
+                            EUR yok
+                          </Link>
+                        ) : (
+                          <span className="ml-1 rounded bg-red-100 px-1 text-xs text-red-700" title="DÖVİZ EURO boş — ödeme hesaba girmedi">
+                            EUR yok
+                          </span>
+                        ))}
+                      {p.is_kdv && !eurYok && (
                         <span
                           className={'ml-1 rounded px-1 text-xs ' + (kdvEslesti ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700')}
                           title={
@@ -434,7 +451,17 @@ export default async function FirmaDetayPage({
                     </td>
                     <td className="px-3 py-2">{p.islem_tarihi ? trDate(p.islem_tarihi.slice(0, 10)) : '—'}</td>
                     <td className="px-3 py-2">{p.sheet_side === 'PESIN' ? 'Peşin' : 'Vadeli'}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{eur(p.doviz_eur_cents)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {eur(etkin)}
+                      {p.doviz_eur_cents_override != null && (
+                        <span
+                          className="ml-1 rounded bg-blue-50 px-1 text-xs text-blue-700"
+                          title={'Elle girildi · dosyada: ' + (p.doviz_eur_cents !== null ? eur(p.doviz_eur_cents) : 'boş')}
+                        >
+                          elle
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-500">
                       {p.gelen_tl !== null ? Number(p.gelen_tl).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) : '—'}
                     </td>
@@ -462,8 +489,8 @@ export default async function FirmaDetayPage({
         <p className="mt-2 text-xs text-slate-400">
           Eşleştirme kuralı: KDV 1/5 ödemeleri referansındaki (son 4 hane) irsaliyeden tamamıyla düşülür; diğer tüm
           ödemeler tek havuzda toplanır, önce peşin borçlar (en eski önce), sonra en yakın vadeli konsinye taksitleri
-          kapatılır. ALC kayıtları ve referansı çözülemeyen KDV ödemeleri tahsise girmez. Her düzenlemeden sonra bu firma
-          anında yeniden hesaplanır.
+          kapatılır. ALC kayıtları, referansı çözülemeyen KDV ödemeleri ve EUR tutarı olmayan ödemeler tahsise girmez (EUR
+          tutarı İnceleme → Ödeme Tutarı’ndan girilebilir). Her düzenlemeden sonra bu firma anında yeniden hesaplanır.
         </p>
       </section>
     </div>

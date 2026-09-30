@@ -95,14 +95,27 @@ export default async function TakvimSayfasi({ taraf, yol, baslik, aciklama, aram
 
       <OzetSeridi ogeler={ogeler} />
 
-      {taraf === 'PESIN' && (
-        <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatCard title="0-30 Gün" value={eur(o?.yas_0_30 ?? 0)} />
-          <StatCard title="31-60 Gün" value={eur(o?.yas_31_60 ?? 0)} tone={(o?.yas_31_60 ?? 0) > 0 ? 'amber' : 'default'} />
-          <StatCard title="61-90 Gün" value={eur(o?.yas_61_90 ?? 0)} tone={(o?.yas_61_90 ?? 0) > 0 ? 'amber' : 'default'} />
-          <StatCard title="90+ Gün" value={eur(o?.yas_90p ?? 0)} tone={(o?.yas_90p ?? 0) > 0 ? 'red' : 'default'} />
-        </div>
-      )}
+      {taraf === 'PESIN' &&
+        (o?.yas_gelmemis !== undefined && o?.yas_1_30 !== undefined ? (
+          // 0008: vadesi gelmemiş tutar ayrı dilimde; beş dilimin toplamı = toplam kalan
+          <div className="mt-3">
+            <p className="text-xs font-medium text-slate-500">Yaşlandırma — bugüne göre gecikme günü</p>
+            <div className="mt-1.5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <StatCard title="Vadesi Gelmemiş" value={eur(o.yas_gelmemis)} sub="bugün ve sonrası" />
+              <StatCard title="1-30 Gün" value={eur(o.yas_1_30)} tone={o.yas_1_30 > 0 ? 'amber' : 'default'} />
+              <StatCard title="31-60 Gün" value={eur(o.yas_31_60)} tone={o.yas_31_60 > 0 ? 'amber' : 'default'} />
+              <StatCard title="61-90 Gün" value={eur(o.yas_61_90)} tone={o.yas_61_90 > 0 ? 'amber' : 'default'} />
+              <StatCard title="90+ Gün" value={eur(o.yas_90p)} tone={o.yas_90p > 0 ? 'red' : 'default'} />
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard title="0-30 Gün" value={eur(o?.yas_0_30 ?? 0)} />
+            <StatCard title="31-60 Gün" value={eur(o?.yas_31_60 ?? 0)} tone={(o?.yas_31_60 ?? 0) > 0 ? 'amber' : 'default'} />
+            <StatCard title="61-90 Gün" value={eur(o?.yas_61_90 ?? 0)} tone={(o?.yas_61_90 ?? 0) > 0 ? 'amber' : 'default'} />
+            <StatCard title="90+ Gün" value={eur(o?.yas_90p ?? 0)} tone={(o?.yas_90p ?? 0) > 0 ? 'red' : 'default'} />
+          </div>
+        ))}
 
       {(o?.tarihsiz_adet ?? 0) > 0 && (
         <p className="mt-3 text-sm text-amber-700">

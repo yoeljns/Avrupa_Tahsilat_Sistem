@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import ClearReviewButton from '@/components/ClearReviewButton'
 import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
+import OdemeTutarGirisi from '@/components/OdemeTutarGirisi'
 import ReviewClassifyTable, { type ReviewRow } from '@/components/ReviewClassifyTable'
 import { requireRole } from '@/lib/auth'
 import { eur, trDate } from '@/lib/format'
@@ -21,7 +22,10 @@ const TABS = [
   { key: 'cakisma', label: 'Çakışmalar' },
   { key: 'otuzbiraralik', label: '31/12 Hariçler' },
   { key: 'tarihsiz', label: 'Tarih Girilmedi' },
+  { key: 'odeme', label: 'Ödeme Tutarı' },
 ] as const
+
+const tl = (n: number | null) => (n === null ? '—' : n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' TL')
 
 /** 'Diğer' sekmesindeki kaydın neden incelemede olduğu */
 function uyariNedeni(i: IncelemeIrsaliye): string {
@@ -64,6 +68,8 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
   )
   const dec31 = invoices.filter((i) => i.is_31_12)
   const noDateRows = veri.tarihsiz
+  // 0008: EUR'suz (hesaba giremeyen) ve elle tutarı dosyayla çelişen ödemeler — takip dışı firmalar SQL'de hariç
+  const odemeler = veri.odemeler ?? []
 
   const counts: Record<string, number> = {
     siniflandirma: classification.length,
@@ -73,6 +79,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
     cakisma: conflicts.length,
     otuzbiraralik: dec31.length,
     tarihsiz: noDateRows.length,
+    odeme: odemeler.length,
   }
 
   return (
@@ -247,6 +254,48 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
                 <Link key="l" href={`/firmalar/${r.firm_id}`} className="text-blue-700 hover:underline">
                   Düzenle →
                 </Link>,
+              ])}
+            />
+          </>
+        )}
+
+        {tab === 'odeme' && (
+          <>
+            <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+              Bu ödemelerin dosyada <strong>DÖVİZ EURO</strong> tutarı yok; bu yüzden hiçbir borca yazılmıyor. EUR tutarını
+              girin: firma hemen yeniden hesaplanır. Öneri, GELEN TL’nin ödemenin kuruna (yoksa ±7 gündeki ödemelerin
+              ortalama kuruna) bölünmesiyle bulunur; kaydetmeden önce kontrol edin. Girilen tutar sonraki içe aktarmalarda
+              korunur.
+            </p>
+            <SimpleTable
+              empty="EUR tutarı eksik ödeme yok."
+              head={['İşlem Kodu', 'Firma', 'Tarih', 'Gelen TL', 'Kur', 'Durum', 'EUR']}
+              rows={odemeler.map((o) => [
+                <span key="k" className="font-mono text-xs">
+                  {o.islem_kodu}
+                  {o.is_kdv && <span className="ml-1 rounded bg-violet-100 px-1 text-violet-700">KDV</span>}
+                </span>,
+                <Link key="f" href={`/firmalar/${o.firm_id}`} className="text-blue-700 hover:underline">
+                  {o.firm_code} {o.firm_name.slice(0, 20)}
+                </Link>,
+                o.islem_tarihi ? trDate(o.islem_tarihi.slice(0, 10)) : '—',
+                tl(o.gelen_tl),
+                o.kur ? o.kur.toLocaleString('tr-TR', { maximumFractionDigits: 4 }) : '—',
+                o.durum === 'eksik' ? (
+                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">EUR yok</span>
+                ) : (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Dosyayla çelişiyor</span>
+                ),
+                <OdemeTutarGirisi
+                  key="g"
+                  id={o.id}
+                  islemKodu={o.islem_kodu}
+                  durum={o.durum}
+                  gelenTl={o.gelen_tl}
+                  oneriKur={o.oneri_kur}
+                  dosyadaki={o.doviz_eur_cents}
+                  elle={o.doviz_eur_cents_override}
+                />,
               ])}
             />
           </>

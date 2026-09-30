@@ -4,7 +4,8 @@ import { apiSession } from '@/lib/auth'
 import { fetchAll } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 import { aoaSheet, c2e, workbookResponse, type CellValue } from '@/lib/export/xlsxUtil'
-import { trDate } from '@/lib/format'
+import { todayISO, trDate } from '@/lib/format'
+import { vadesiGecmisHaritasi } from '@/lib/export/vadesiGecmis'
 import { isMissingRelationError } from '@/components/MigrationNeeded'
 import { kategorileriYukle } from '@/lib/kategoriler'
 import { kategoriEtiketi } from '@/lib/kategoriMeta'
@@ -56,7 +57,6 @@ export async function GET() {
     firm_id: string
     pesin_open_eur_cents: number
     vadeli_open_eur_cents: number
-    vadeli_overdue_eur_cents: number
     credit_eur_cents: number
     total_debt_eur_cents: number
     total_paid_eur_cents: number
@@ -65,7 +65,7 @@ export async function GET() {
     ? await fetchAll<BalRow>((from, to) =>
         admin
           .from('firm_balances')
-          .select('firm_id, pesin_open_eur_cents, vadeli_open_eur_cents, vadeli_overdue_eur_cents, credit_eur_cents, total_debt_eur_cents, total_paid_eur_cents')
+          .select('firm_id, pesin_open_eur_cents, vadeli_open_eur_cents, credit_eur_cents, total_debt_eur_cents, total_paid_eur_cents')
           .eq('run_id', runRow.run_id)
           .order('firm_id')
           .range(from, to),
@@ -171,9 +171,11 @@ export async function GET() {
   const pesinTakvim = takvimSayfasi('PESIN')
   XLSX.utils.book_append_sheet(wb, aoaSheet(pesinTakvim.matrix, pesinTakvim.widths), 'Peşin Takvim')
 
-  // 4) Bakiyeler ve alacaklar
+  // 4) Bakiyeler ve alacaklar — "Vadesi Geçmiş" BUGÜNE göre (ekranlarla aynı), son hesap tarihine göre değil
+  const bugun = todayISO()
+  const vadesiGecmis = vadesiGecmisHaritasi(scope, bugun)
   const credits: CellValue[][] = [
-    ['Firma Kodu', 'Firma', 'Peşin Açık €', 'Konsinye Açık €', 'Vadesi Geçmiş €', 'Alacak €', 'Toplam Borç €', 'Toplam Ödeme €'],
+    ['Firma Kodu', 'Firma', 'Peşin Açık €', 'Konsinye Açık €', `Vadesi Geçmiş € (${trDate(bugun)})`, 'Alacak €', 'Toplam Borç €', 'Toplam Ödeme €'],
     ...balances
       .filter((b) => b.credit_eur_cents > 0 || b.pesin_open_eur_cents > 0 || b.vadeli_open_eur_cents > 0)
       .map((b): CellValue[] => {
@@ -183,7 +185,7 @@ export async function GET() {
           f?.name ?? '',
           c2e(b.pesin_open_eur_cents),
           c2e(b.vadeli_open_eur_cents),
-          c2e(b.vadeli_overdue_eur_cents),
+          c2e(vadesiGecmis.get(b.firm_id) ?? 0),
           c2e(b.credit_eur_cents),
           c2e(b.total_debt_eur_cents),
           c2e(b.total_paid_eur_cents),
@@ -193,6 +195,6 @@ export async function GET() {
   ]
   XLSX.utils.book_append_sheet(wb, aoaSheet(credits, [10, 34, 12, 14, 14, 12, 13, 14]), 'Bakiyeler ve Alacaklar')
 
-  const today = new Date().toISOString().slice(0, 10)
-  return workbookResponse(wb, `borclar_${today}.xlsx`)
+  // Dosya adı Türkiye tarihiyle (gece 00:00–03:00 arasında da doğru gün)
+  return workbookResponse(wb, `borclar_${bugun}.xlsx`)
 }

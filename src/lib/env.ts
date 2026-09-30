@@ -46,3 +46,8 @@ export function supabaseServiceRoleKey(): string {
 export function setupSecret(): string | null {
   return firstEnv(['SETUP_SECRET'])
 }
+
+/** Gece hesabı ucunu yalnız Vercel Cron'un çağırabilmesi için (isteğe bağlı). */
+export function cronSecret(): string | null {
+  return firstEnv(['CRON_SECRET'])
+}

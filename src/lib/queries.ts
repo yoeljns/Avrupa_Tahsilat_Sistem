@@ -145,6 +145,8 @@ export interface FirmaDetayOdeme {
   islem_tarihi: string | null
   gelen_tl: number | null
   doviz_eur_cents: number | null
+  /** 0008: yönetimin elle girdiği EUR; varsa hesapta bu kullanılır */
+  doviz_eur_cents_override?: number | null
   kur: number | null
   aciklama: string | null
   kayit_durumu: string | null
@@ -202,10 +204,15 @@ export interface TakvimVerisi {
     /** bugün dahil 7 gün içinde vadesi gelen kalan */
     yakin_7: number
     tarihsiz_adet: number
+    /** bugün − vade ≤ 30 (vadesi gelmemiş dahil; önceki sürüm için) */
     yas_0_30: number
     yas_31_60: number
     yas_61_90: number
     yas_90p: number
+    /** 0008: vadesi gelmemiş (vade ≥ bugün) */
+    yas_gelmemis?: number
+    /** 0008: 1–30 gün gecikmiş */
+    yas_1_30?: number
   } | null
   /** Yalnız seçili ay */
   ay_ozet: { borc: number; odeme: number; kalan: number; gecikmis: number } | null
@@ -278,11 +285,35 @@ export interface IncelemeTarihsiz {
   remaining_eur_cents: number
 }
 
+/** 0008: EUR tutarı olmayan (hesaba giremeyen) ya da elle tutarı dosyayla çelişen ödeme */
+export interface IncelemeOdeme {
+  id: string
+  islem_kodu: string
+  firm_id: string
+  firm_code: string
+  firm_name: string
+  islem_tarihi: string | null
+  sheet_side: string
+  gelen_tl: number | null
+  kur: number | null
+  toplam_tl: number | null
+  aciklama: string | null
+  is_kdv: boolean
+  doviz_eur_cents: number | null
+  doviz_eur_cents_override: number | null
+  /** eksik: hesapta tutar yok · cakisma: elle girilen tutar dosyadakinden farklı */
+  durum: 'eksik' | 'cakisma'
+  /** ödemenin kendi kuru; yoksa ±7 gündeki ödemelerin ortalama kuru */
+  oneri_kur: number | null
+}
+
 export interface IncelemeVerisi {
   irsaliyeler: IncelemeIrsaliye[]
   tarihsiz: IncelemeTarihsiz[]
   /** 0007: atama seçenekleri */
   kategoriler?: KategoriMeta[]
+  /** 0008: EUR'suz ve çelişen ödemeler */
+  odemeler?: IncelemeOdeme[]
 }
 
 export function incelemeVerisi(supabase: SupabaseClient): Promise<IncelemeVerisi> {
@@ -307,6 +338,8 @@ export interface YonetimOzeti {
   } | null
   saglik: { siniflandirilmamis: number; siniflandirilmamis_tutar: number; inceleme: number; cakisma: number; plan_okunamadi: number }
   tarihsiz_taksit: number
+  /** 0008: EUR tutarı olmadığı için hesaba giremeyen ödemeler */
+  odeme_eur_eksik?: { adet: number; gelen_tl: number }
   son_aktarimlar: Array<{
     id: string
     kind: string

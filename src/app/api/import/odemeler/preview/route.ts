@@ -114,6 +114,8 @@ export async function POST(request: Request) {
   const alcCount = parsed.records.filter((r) => r.isAlc).length
   const incompleteCount = parsed.records.filter((r) => !r.isComplete).length
   const kdvCount = parsed.records.filter((r) => r.isKdv).length
+  // Tahsise girecek ama DÖVİZ EURO'su boş kayıtlar: hesaba giremez (elle EUR girilebilir)
+  const eursuzCount = parsed.records.filter((r) => !r.isAlc && r.isComplete && (r.dovizEurCents === null || r.dovizEurCents <= 0)).length
 
   return NextResponse.json({
     batchId: batch.id,
@@ -133,6 +135,11 @@ export async function POST(request: Request) {
         : []),
       ...(alcCount > 0 ? [`${alcCount} ALC (alacak) kaydı bilgi olarak saklanacak, tahsise girmeyecek.`] : []),
       ...(incompleteCount > 0 ? [`${incompleteCount} kayıt TAMAMLANMAMIŞ durumda — tahsise girmeyecek.`] : []),
+      ...(eursuzCount > 0
+        ? [
+            `${eursuzCount} ödemede DÖVİZ EURO boş — bu ödemeler hiçbir borca yazılmaz. Yükledikten sonra İnceleme → Ödeme Tutarı'ndan EUR tutarını girin (girilen tutar sonraki yüklemelerde korunur).`,
+          ]
+        : []),
       ...(kdvCount > 0
         ? [`${kdvCount} KDV 1/5 ödemesi, referansındaki (son 4 hane) irsaliyeden düşülecek; referansı çözülemeyenler tahsise girmez.`]
         : []),

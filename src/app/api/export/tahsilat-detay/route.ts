@@ -4,7 +4,7 @@ import { apiSession } from '@/lib/auth'
 import { fetchAll } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 import { aoaSheet, c2e, workbookResponse, type CellValue } from '@/lib/export/xlsxUtil'
-import { trDate } from '@/lib/format'
+import { todayISO, trDate } from '@/lib/format'
 import { kategorileriYukle } from '@/lib/kategoriler'
 import { kategoriEtiketi } from '@/lib/kategoriMeta'
 
@@ -47,17 +47,25 @@ export async function GET() {
     sheet_side: string
     islem_tarihi: string | null
     doviz_eur_cents: number | null
+    /** 0008: elle girilen EUR */
+    doviz_eur_cents_override?: number | null
     allocatable: boolean
     is_alc: boolean
     is_kdv: boolean
   }
-  const payments = await fetchAll<PayRow>((from, to) =>
-    admin
-      .from('payments')
-      .select('id, islem_kodu, firm_id, sheet_side, islem_tarihi, doviz_eur_cents, allocatable, is_alc, is_kdv')
-      .order('islem_tarihi')
-      .order('id') // eşit tarihlerde sayfa sınırında satır atlanmasın/tekrarlanmasın
-      .range(from, to),
+  const odemeKolonlari = 'id, islem_kodu, firm_id, sheet_side, islem_tarihi, doviz_eur_cents, allocatable, is_alc, is_kdv'
+  const odemeOku = (kolonlar: string) =>
+    fetchAll<PayRow>((from, to) =>
+      admin
+        .from('payments')
+        .select(kolonlar)
+        .order('islem_tarihi')
+        .order('id') // eşit tarihlerde sayfa sınırında satır atlanmasın/tekrarlanmasın
+        .range(from, to) as unknown as PromiseLike<{ data: PayRow[] | null; error: { message: string } | null }>,
+    )
+  // 0008 öncesi veritabanında elle EUR kolonu yoktur
+  const payments = await odemeOku(odemeKolonlari + ', doviz_eur_cents_override').catch((e: unknown) =>
+    /doviz_eur_cents_override/.test(e instanceof Error ? e.message : String(e)) ? odemeOku(odemeKolonlari) : Promise.reject(e),
   )
 
   interface InvRow {
@@ -123,10 +131,13 @@ export async function GET() {
     ['İşlem Kodu', 'Ödeme Tarihi', 'Firma Kodu', 'Firma', 'Sayfa', 'Ödeme €', 'Tahsis €', 'Kalan (Alacak) €', 'Durum'],
   ]
   for (const p of payments) {
-    const total = p.doviz_eur_cents ?? 0
+    // Hesapta kullanılan tutar: elle girilen EUR, yoksa dosyadaki DÖVİZ EURO
+    const etkin = p.doviz_eur_cents_override ?? p.doviz_eur_cents
+    const eurYok = p.allocatable && (etkin === null || etkin <= 0)
+    const total = etkin ?? 0
     const allocated = allocatedByPayment.get(p.id) ?? 0
     const rest = total - allocated
-    if (!p.allocatable || rest > 0) {
+    if (!p.allocatable || rest > 0 || eurYok) {
       const f = firmById.get(p.firm_id)
       unmatched.push([
         p.islem_kodu,
@@ -134,17 +145,21 @@ export async function GET() {
         f?.code_norm ?? '',
         f?.name ?? '',
         p.sheet_side === 'PESIN' ? 'Peşin' : 'Vadeli',
-        c2e(total),
+        c2e(etkin),
         c2e(allocated),
-        c2e(p.allocatable ? rest : null),
-        p.is_alc
+        c2e(p.allocatable && !eurYok ? rest : null),
+        eurYok
+          ? 'EUR tutarı yok — hesaba girmedi (İnceleme → Ödeme Tutarı)'
+          : p.is_alc
           ? 'ALC (eski sistem alacak kaydı)'
           : p.is_kdv
             ? allocated > 0
               ? 'KDV 1/5 — kısmen eşleşti'
               : 'KDV 1/5 — irsaliye eşleşmedi'
             : p.allocatable
-              ? 'Alacak'
+              ? p.doviz_eur_cents_override != null
+                ? 'Alacak (EUR elle girildi)'
+                : 'Alacak'
               : 'Tahsise kapalı',
       ])
     }
@@ -184,6 +199,6 @@ export async function GET() {
   ]
   XLSX.utils.book_append_sheet(wb, aoaSheet(openSheet, [12, 10, 32, 8, 20, 16, 12]), 'Açık Taksitler')
 
-  const today = new Date().toISOString().slice(0, 10)
-  return workbookResponse(wb, `tahsilat_detay_${today}.xlsx`)
+  // Dosya adı Türkiye tarihiyle (gece 00:00–03:00 arasında da doğru gün)
+  return workbookResponse(wb, `tahsilat_detay_${todayISO()}.xlsx`)
 }

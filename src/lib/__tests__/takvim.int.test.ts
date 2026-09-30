@@ -2,7 +2,7 @@ import type { Pool } from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createPgShim } from '@/lib/import/__tests__/pgShim'
 import { runRecompute } from '@/lib/recompute'
-import { KULLANICI, SENTETIK_VERI, SOCKET, firmUuid, gocSql, kullaniciOlarak, testVeritabaniKur } from './testVeritabani'
+import { KULLANICI, SENTETIK_VERI, SOCKET, firmUuid, gocSql, gocler, kullaniciOlarak, testVeritabaniKur } from './testVeritabani'
 
 // 0006_takvim.sql doğrulaması (yerel Postgres):
 //   PG_TEST_SOCKET=/tmp/pgs npx vitest run src/lib/__tests__/takvim.int.test.ts
@@ -60,6 +60,9 @@ describe.skipIf(!SOCKET)('0006: rpc_takvim', () => {
 
   it('göç ikinci kez uygulanabilir (idempotent)', async () => {
     await pool.query(gocSql('0006_takvim.sql'))
+    // 0006 fonksiyonları eski gövdeyle yeniden kurdu → sonraki göçler de yeniden uygulanır ki
+    // bu dosyadaki diğer testler güncel tanımlarla koşsun
+    for (const f of gocler().filter((g) => g > '0006_takvim.sql')) await pool.query(gocSql(f))
     const r = await pool.query(`select count(*)::int as n from pg_proc where proname = 'rpc_takvim'`)
     expect(r.rows[0].n).toBe(1) // aşırı yükleme yok
   })

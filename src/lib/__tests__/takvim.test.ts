@@ -96,6 +96,12 @@ describe('hücre durumu (bugüne göre)', () => {
     expect(tek('2026-06-18')?.durum).toBe('yakin')
     expect(tek('2026-06-25')?.durum).toBe('ileri')
   })
+  it('7 gün sınırı bugün dahil: bugün+6 yakın, bugün+7 ileri (Pano ile aynı tanım, 0008)', () => {
+    const sinir = { '2026-06-21': [100, 0, 100] as [number, number, number], '2026-06-22': [100, 0, 100] as [number, number, number] }
+    const h = (d: string) => sutunHucresi(sinir, { anahtar: d, bas: d, son: d, baslik: '', konum: 'gelecek' }, bugun)?.durum
+    expect(h('2026-06-21')).toBe('yakin')
+    expect(h('2026-06-22')).toBe('ileri')
+  })
   it('vade yoksa null', () => expect(tek('2026-06-01')).toBeNull())
   it('hafta sütunu toplar; en kötü durum kazanır', () => {
     const h = sutunHucresi(gunler, { anahtar: 'h', bas: '2026-06-08', son: '2026-06-21', baslik: '', konum: 'bugun' }, bugun)!

@@ -27,9 +27,11 @@ import {
 // firma başına tüm ödemeler önce peşin borçları, sonra en yakın vadeli
 // taksitleri kapatır. KDV 1/5 ödemeleri havuza girmez: referansındaki
 // (son 4 hane) irsaliyeden tamamı düşülür; referansı çözülemeyenler tahsise
-// girmez. ALC ve TAMAMLANMAMIŞ kayıtlar her zaman dışarıdadır.
+// girmez. ALC ve TAMAMLANMAMIŞ kayıtlar her zaman dışarıdadır. Ödemenin tutarı:
+// yönetimin elle girdiği EUR varsa o, yoksa dosyadaki DÖVİZ EURO; ikisi de yoksa
+// ödeme hesaba giremez ve İnceleme → Ödeme Tutarı'nda listelenir.
 
-export type TriggerKind = 'import' | 'edit' | 'manual' | 'setup'
+export type TriggerKind = 'import' | 'edit' | 'manual' | 'setup' | 'cron'
 
 export interface RecomputeStats {
   runId: string
@@ -82,6 +84,28 @@ function bakiyeSatirlari(result: EngineOutput) {
     total_debt_eur_cents: b.totalDebtCents,
     total_paid_eur_cents: b.totalPaidCents,
   }))
+}
+
+const ODEME_KOLONLARI = 'id, islem_kodu, firm_id, islem_tarihi, doviz_eur_cents, is_kdv, kdv_fatura_referansi, aciklama'
+
+/**
+ * Tahsise uygun ödemeler (elle girilen EUR dahil). 0008 henüz uygulanmamış bir
+ * veritabanında elle EUR kolonu yoktur → onsuz okunur (dağıtım anı ve eski testler).
+ */
+async function odemeleriOku(admin: SupabaseClient): Promise<GirdiOdeme[]> {
+  const oku = (kolonlar: string) =>
+    fetchAll<GirdiOdeme>((from, to) =>
+      admin.from('payments').select(kolonlar).eq('allocatable', true).order('id').range(from, to) as unknown as PromiseLike<{
+        data: GirdiOdeme[] | null
+        error: { message: string } | null
+      }>,
+    )
+  try {
+    return await oku(ODEME_KOLONLARI + ', doviz_eur_cents_override')
+  } catch (e) {
+    if (/doviz_eur_cents_override/.test(e instanceof Error ? e.message : String(e))) return oku(ODEME_KOLONLARI)
+    throw e
+  }
 }
 
 /** Yanıttan SONRA çalıştırılabilecek temizlik işi (Next `after`); istek dışında hemen koşar. */
@@ -156,14 +180,7 @@ export async function runRecompute(
         .order('id')
         .range(from, to),
     ),
-    fetchAll<GirdiOdeme>((from, to) =>
-      admin
-        .from('payments')
-        .select('id, islem_kodu, firm_id, islem_tarihi, doviz_eur_cents, is_kdv, kdv_fatura_referansi, aciklama')
-        .eq('allocatable', true)
-        .order('id')
-        .range(from, to),
-    ),
+    odemeleriOku(admin),
   ])
 
   // 2) Saf motor

@@ -20,7 +20,9 @@ Boya/hırdavat toptan satışı için **alacak ve tahsilat takip sistemi**. Sat�
   **KDV 1/5 ödemeleri** havuza girmez: ödemenin yanındaki irsaliye referansı (son 4 hane —
   'KDV FATURA REFERANSI' kolonu veya açıklamadaki `0042-5TE1` deseni) ile **eşleşen irsaliyeden
   tamamı düşülür, kalan tutar taksitlendirilmiş kabul edilir**. Referansı çözülemeyen KDV
-  ödemeleri tahsise girmez ve panelde "eşleşmedi" olarak görünür.
+  ödemeleri tahsise girmez ve panelde "eşleşmedi" olarak görünür. **DÖVİZ EURO'su boş** ödemeler
+  de hesaba giremez: **İnceleme → Ödeme Tutarı**'ndan EUR girilir (öneri: GELEN TL ÷ kur); girilen
+  tutar sonraki yüklemelerde korunur. Her gece otomatik tam hesap yapılır (`vercel.json` → `crons`).
 - **Takvim görünümleri:** Konsinye/Konsinye Peşin ayrı, Peşin ayrı sayfada; satır = firma.
   **Sade** görünümde her vade günü (ya da haftası) tek hücre: kalan tutar, **bugüne göre** renkli
   (vadesi geçti kırmızı · 7 gün içinde turuncu · ödendi yeşil); tıklayınca Borç · Ödeme · Kalan.
@@ -74,13 +76,20 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 1. [supabase.com/dashboard](https://supabase.com/dashboard) → projeniz → sol menüden **SQL Editor**.
 2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: **`supabase/migrations/0001_init.sql`** →
    **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** → **`0004_hiz.sql`** →
-   **`0005_hiz_rls.sql`** → **`0006_takvim.sql`** → **`0007_kategoriler.sql`** (her birinin içeriğini
-   yapıştırıp **Run**).
+   **`0005_hiz_rls.sql`** → **`0006_takvim.sql`** → **`0007_kategoriler.sql`** →
+   **`0008_duzeltmeler.sql`** (her birinin içeriğini yapıştırıp **Run**).
 3. Hepsinde "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
 
 > **Sistemi daha önce kurduysanız (güncelleme):** yalnız henüz çalıştırmadığınız migration
 > dosyalarını sırayla çalıştırın, ardından uygulamada **Pano → Yeniden Hesapla**'ya basın.
 > Dosyaları yeniden yüklemeniz gerekmez.
+
+> **Gece otomatik hesap (0008):** `vercel.json`'daki `crons` kaydı her gece 00:00 UTC'de
+> (≈ 03:00 Türkiye) `/api/cron/gece-hesabi` ucunu çağırır; uç o gün henüz tam hesap
+> yapılmadıysa bütün sistemi yeniden hesaplar (günde en fazla bir kez). Vercel Cron yalnız
+> üretim dağıtımında çalışır. **İsteğe bağlı:** Vercel → Settings → Environment Variables'a
+> `CRON_SECRET` (uzun rastgele bir değer) eklerseniz ucu yalnız Vercel'in zamanlayıcısı
+> çağırabilir; eklemezseniz de günlük koruma sayesinde en fazla bir hesap yapılır.
 
 > **Sürüm geri alma notu (0007):** Migration'lar geri uyumludur — eski uygulama sürümü yeni
 > şemayla çalışmaya devam eder. **Ancak** panelden yeni bir satış kategorisi oluşturup
@@ -129,7 +138,7 @@ yeniden hesaplanır.
 | `/setup` "Kurulum daha önce tamamlanmış" diyor | Normal — kullanıcılar zaten oluşturulmuş. Yeni kullanıcı/şifre işlemleri **Yönetim → Kullanıcılar**'dan yapılır. |
 | Pazarlamacı hiç firma göremiyor | Bayi listesindeki `pazarlamaci_email` ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayi Listesi**'nden dosyayı güncelleyin. |
 | İçe aktarma "yetkiniz yok" diyor | İçe aktarmayı yalnız Yönetici ve Tahsilat Yöneticisi yapabilir. |
-| Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı tazeleyebilirsiniz. **Yönetim → Genel Bakış** veri sağlığını tek ekranda gösterir. |
+| Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı hemen tazeleyebilirsiniz (her gece kendiliğinden de yapılır). EUR tutarı boş ödemeler hiçbir borca yazılmaz: **İnceleme → Ödeme Tutarı**'ndan EUR girin. **Yönetim → Genel Bakış** veri sağlığını tek ekranda gösterir. |
 | Çok sayıda irsaliye "Sınıflandırılmadı" | **Yönetim → Tanıma Kuralları**: sağdaki "Tanınmayan Belge No kalıpları"na tıklayın, deneme kutusunda sonucu görün, uygun kuralı ekleyip **Etkiyi önizle → Kaydet ve uygula**. |
 | İçe aktarma "kurallar önizlemeden sonra değişti" diyor | Önizleme ile onay arasında tanıma kuralları değişmiş. Dosyayı yeniden önizleyip onaylayın. |
 | Sayfalar yavaş açılıyor | `https://<adresiniz>/api/saglik` açın: `sunucu_bolgesi` `fra1` ve `en_hizli_tur_ms` 60'ın altında olmalı (normalde ~35). Değilse Vercel'de son dağıtımın üretimde olduğunu ve `vercel.json`'daki bölgeyi kontrol edin. |
