@@ -125,7 +125,7 @@ export default async function YardimPage() {
       />
 
       <div className="mt-6 gap-8 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <nav aria-label="İçindekiler" className="mb-6 rounded-2xl bg-white p-4 text-sm shadow-sm ring-1 ring-slate-200/70 lg:sticky lg:top-4 lg:mb-0 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-auto print:hidden">
+        <nav aria-label="İçindekiler" className="mb-6 rounded-2xl bg-white p-4 text-sm shadow-sm ring-1 ring-slate-200/70 lg:sticky lg:top-20 lg:mb-0 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-auto print:hidden">
           <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">İçindekiler</p>
           <ol className="mt-2 space-y-1">
             {p.bolumler.map((b, i) => (

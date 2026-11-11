@@ -131,7 +131,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
             head={['Fiş No', 'Firma', 'Tarih', 'Plan', 'Not', 'Tutar €', '']}
             rows={planIssues.map((i) => [
               i.fis_no,
-              `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
+              <Firma key="f" kod={i.firm_code} ad={i.firm_name} id={i.firm_id} />,
               trDate(i.invoice_date),
               i.plan_override_note ?? i.odeme_plani_raw,
               i.plan_parse_note ?? '',
@@ -154,7 +154,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
               head={['Fiş No', 'Firma', 'Tarih', 'Plan', 'Neden', 'Tutar €', '']}
               rows={diger.map((i) => [
                 i.fis_no,
-                `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
+                <Firma key="f" kod={i.firm_code} ad={i.firm_name} id={i.firm_id} />,
                 trDate(i.invoice_date),
                 i.plan_override_note ?? i.odeme_plani_raw,
                 uyariNedeni(i),
@@ -182,7 +182,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
               head={['Fiş No', 'Firma', 'Tarih', 'Belge No', 'Tutar €', 'Durum', '']}
               rows={iadeler.map((i) => [
                 i.fis_no,
-                `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
+                <Firma key="f" kod={i.firm_code} ad={i.firm_name} id={i.firm_id} />,
                 trDate(i.invoice_date),
                 i.belge_no_raw,
                 eur(i.amount_eur_cents),
@@ -204,7 +204,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
             head={['Fiş No', 'Firma', 'Tarih', 'Açıklama', 'Tutar €', '']}
             rows={conflicts.map((i) => [
               i.fis_no,
-              `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
+              <Firma key="f" kod={i.firm_code} ad={i.firm_name} id={i.firm_id} />,
               trDate(i.invoice_date),
               'Düzenleme sonrası içe aktarılan ham veri değişti — kontrol edin',
               eur(i.amount_eur_cents),
@@ -228,7 +228,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
               head={['Fiş No', 'Firma', 'Belge No', 'Plan', 'Tutar €']}
               rows={dec31.map((i) => [
                 i.fis_no,
-                `${i.firm_code} ${i.firm_name.slice(0, 20)}`,
+                <Firma key="f" kod={i.firm_code} ad={i.firm_name} id={i.firm_id} />,
                 i.belge_no_raw,
                 i.odeme_plani_raw,
                 eur(i.amount_eur_cents),
@@ -247,7 +247,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
               empty="Tarihsiz açık taksit yok."
               head={['Firma', 'Fiş No', 'Varsayılan Vade', 'Kalan €', '']}
               rows={noDateRows.map((r) => [
-                `${r.firm_code} ${r.firm_name.slice(0, 24)}`,
+                <Firma key="f" kod={r.firm_code} ad={r.firm_name} id={r.firm_id} />,
                 r.fis_no,
                 trDate(r.due_date),
                 eur(r.remaining_eur_cents),
@@ -275,9 +275,7 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
                   {o.islem_kodu}
                   {o.is_kdv && <span className="ml-1 rounded bg-violet-100 px-1 text-violet-700">KDV</span>}
                 </span>,
-                <Link key="f" href={`/firmalar/${o.firm_id}`} className="text-blue-700 hover:underline">
-                  {o.firm_code} {o.firm_name.slice(0, 20)}
-                </Link>,
+                <Firma key="f" kod={o.firm_code} ad={o.firm_name} id={o.firm_id} />,
                 o.islem_tarihi ? trDate(o.islem_tarihi.slice(0, 10)) : '—',
                 tl(o.gelen_tl),
                 o.kur ? o.kur.toLocaleString('tr-TR', { maximumFractionDigits: 4 }) : '—',
@@ -305,17 +303,30 @@ export default async function IncelemePage({ searchParams }: { searchParams: Pro
   )
 }
 
+/** Kod + firma adı: uzun ad kesilir, üzerine gelince tamamı görünür; tıklayınca firma kartı açılır */
+function Firma({ kod, ad, id }: { kod: string; ad: string; id: string }) {
+  return (
+    <Link href={`/firmalar/${id}`} title={`${kod} — ${ad}`} className="block max-w-[17rem] truncate hover:underline">
+      <span className="font-medium text-blue-700">{kod}</span> <span className="text-slate-700">{ad}</span>
+    </Link>
+  )
+}
+
+/** Sayı sütunları (tutar, kur) sağa hizalanır: başlığı € ile biten ya da listedeki sütunlar */
+const SAYI_SUTUNU = /€$|^Gelen TL$|^Kur$/
+
 function SimpleTable({ head, rows, empty }: { head: string[]; rows: React.ReactNode[][]; empty: string }) {
   if (rows.length === 0) {
     return <p className="rounded-2xl bg-white p-6 text-sm text-slate-500 shadow-sm">{empty}</p>
   }
+  const sayi = head.map((h) => SAYI_SUTUNU.test(h))
   return (
     <div className="overflow-x-auto rounded-2xl bg-white shadow-sm">
       <table className="w-full min-w-max text-sm">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             {head.map((h, i) => (
-              <th key={i} className="px-3 py-2">
+              <th key={i} scope="col" className={'px-3 py-2' + (sayi[i] ? ' text-right' : '')}>
                 {h}
               </th>
             ))}
@@ -323,9 +334,9 @@ function SimpleTable({ head, rows, empty }: { head: string[]; rows: React.ReactN
         </thead>
         <tbody>
           {rows.map((cells, i) => (
-            <tr key={i} className="border-b border-slate-100">
+            <tr key={i} className="border-b border-slate-100 hover:bg-slate-50/60">
               {cells.map((c, j) => (
-                <td key={j} className="px-3 py-2">
+                <td key={j} className={'px-3 py-2' + (sayi[j] ? ' text-right whitespace-nowrap tabular-nums' : '')}>
                   {c}
                 </td>
               ))}

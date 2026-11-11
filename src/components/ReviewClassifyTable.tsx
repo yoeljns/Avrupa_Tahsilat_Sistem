@@ -124,8 +124,8 @@ export default function ReviewClassifyTable({ rows, kategoriler }: { rows: Revie
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-slate-100">
                 <td className="px-3 py-2 font-medium">{r.fisNo}</td>
-                <td className="px-3 py-2">
-                  {r.firmCode} <span className="text-slate-500">{r.firmName.slice(0, 22)}</span>
+                <td className="max-w-[17rem] truncate px-3 py-2" title={`${r.firmCode} — ${r.firmName}`}>
+                  {r.firmCode} <span className="text-slate-500">{r.firmName}</span>
                 </td>
                 <td className="px-3 py-2">{r.invoiceDate}</td>
                 <td className="px-3 py-2 text-slate-500">{r.belgeNo || '—'}</td>

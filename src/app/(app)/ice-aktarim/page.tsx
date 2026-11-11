@@ -1,6 +1,8 @@
+import Link from 'next/link'
 import ImportPanel from '@/components/ImportPanel'
 import { requireRole } from '@/lib/auth'
 import { trDateTime } from '@/lib/format'
+import { aktarimOzeti } from '@/lib/import/etiketler'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +13,7 @@ interface BatchRow {
   filename: string
   uploaded_by: string | null
   status: string
-  stats: Record<string, number>
+  stats: Record<string, unknown> | null
   created_at: string
   committed_at: string | null
 }
@@ -41,6 +43,33 @@ export default async function IceAktarimPage() {
         Dosyalar önce önizlenir; siz onaylamadan hiçbir veri değişmez. Aynı dosyayı yeniden yüklemek güvenlidir —
         değişmeyen kayıtlar olduğu gibi kalır, Tahsilat Yöneticisi düzenlemeleri asla ezilmez.
       </p>
+
+      {/* Yükleme sırası: irsaliye ödemeden önce — ödeme, irsaliyenin taksitlerine işlenir */}
+      <ol className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl bg-blue-50 px-4 py-2.5 text-sm text-blue-900">
+        <li className="font-semibold">Yükleme sırası:</li>
+        <li>
+          <span className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">1</span>
+          Bayi listesi <span className="text-blue-700">(yalnız değiştiyse —{' '}
+          <Link href="/yonetim/bayiler" className="font-medium underline">
+            Yönetim → Bayiler ve Sorumlular
+          </Link>
+          )</span>
+        </li>
+        <li aria-hidden="true" className="text-blue-400">
+          →
+        </li>
+        <li>
+          <span className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">2</span>
+          Satış irsaliyeleri
+        </li>
+        <li aria-hidden="true" className="text-blue-400">
+          →
+        </li>
+        <li>
+          <span className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">3</span>
+          Gelen ödemeler
+        </li>
+      </ol>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
         <ImportPanel
@@ -93,11 +122,7 @@ export default async function IceAktarimPage() {
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">İptal</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-xs text-slate-500">
-                  {Object.entries(b.stats ?? {})
-                    .map(([k, v]) => `${k}: ${v}`)
-                    .join(' · ')}
-                </td>
+                <td className="px-3 py-2 text-xs text-slate-500">{aktarimOzeti(b.stats) || '—'}</td>
               </tr>
             ))}
           </tbody>

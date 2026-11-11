@@ -7,8 +7,9 @@ import Button from '@/components/ui/Button'
 import { Field, Input, Select } from '@/components/ui/Field'
 import Modal from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/Toast'
-import { formatCents } from '@/lib/engine/money'
+import { formatCents, parseEurToCents } from '@/lib/engine/money'
 import { DAVRANISLAR, SINIFSIZ_KOD, atanabilirKategoriler, davranisOf, kategoriBul, type KategoriMeta } from '@/lib/kategoriMeta'
+import { esitBol, taksitOzeti } from '@/lib/taksit'
 
 // Tahsilat Yöneticisi'nin irsaliye düzenleme penceresi.
 // Yapılan her değişiklik sunucuda denetim kaydına işlenir ve ilgili firma
@@ -68,6 +69,25 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
   const secili = kategoriBul(kategoriler, saleType)
   const hesapDisi = saleType === SINIFSIZ_KOD || (!!secili && secili.taraf === null)
 
+  // Elle taksit: canlı toplam. Karşılaştırılan tutar, kutuya yeni tutar yazıldıysa odur.
+  const taksitDuzenle = editInstallments && !hesapDisi
+  const irsaliyeKurus = amountEur.trim() ? parseEurToCents(amountEur) : invoice.amountEurCents
+  const ozet = taksitOzeti(drafts, irsaliyeKurus)
+  const kaydetKapali = taksitDuzenle && !ozet.gecerli
+  const taksitSorunu = !taksitDuzenle
+    ? null
+    : drafts.length === 0
+      ? 'En az bir taksit gerekli.'
+      : irsaliyeKurus === null
+        ? 'İrsaliye tutarı okunamıyor; önce tutarı düzeltin.'
+        : ozet.okunamayan > 0
+          ? `${ozet.okunamayan} taksitin tutarı okunamıyor (örnek: 1.250,00).`
+          : ozet.tarihsiz > 0
+            ? `${ozet.tarihsiz} taksitin tarihi girilmedi.`
+            : ozet.fark !== 0
+              ? `Taksitler irsaliye tutarından ${formatCents(Math.abs(ozet.fark ?? 0))} € ${(ozet.fark ?? 0) > 0 ? 'fazla' : 'eksik'}.`
+              : null
+
   function close() {
     setOpen(false)
     setError(null)
@@ -107,9 +127,12 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
     if (reason.trim()) patch.reason = reason.trim()
 
     const hasPatch = Object.keys(patch).some((k) => k !== 'reason')
-    const taksitDuzenle = editInstallments && !hesapDisi
     if (!hasPatch && !taksitDuzenle) {
       setError('Değişiklik yapmadınız.')
+      return
+    }
+    if (taksitSorunu) {
+      setError(taksitSorunu)
       return
     }
     if (hasPatch) {
@@ -150,6 +173,24 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
     setDrafts((d) => d.map((row, idx) => (idx === i ? { ...row, [field]: value } : row)))
   }
 
+  /** İrsaliye tutarını taksit sayısına eşit böler (tarihler kalır) */
+  function esitDagit() {
+    if (irsaliyeKurus === null) return
+    const paylar = esitBol(irsaliyeKurus, drafts.length)
+    setDrafts((d) => d.map((row, i) => ({ ...row, amountEur: formatCents(paylar[i] ?? 0) })))
+  }
+
+  /** Yazı kutusunda Enter: kaydet (iptal görünümünde: iptal et). Tarih ve onay kutularında tarayıcının işi. */
+  function enter(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.nativeEvent.isComposing) return
+    const hedef = e.target as HTMLElement
+    if (hedef.tagName !== 'INPUT' || ['checkbox', 'date', 'radio'].includes((hedef as HTMLInputElement).type)) return
+    e.preventDefault()
+    if (busy) return
+    if (cancelMode) void doCancel(invoice.isCancelled)
+    else void save()
+  }
+
   return (
     <>
       <Button size="sm" icon={<Pencil className="h-3.5 w-3.5" aria-hidden="true" />} onClick={() => setOpen(true)}>
@@ -180,12 +221,12 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
                 onClick={() => setCancelMode(true)}
                 disabled={busy}
               >
-                {invoice.isCancelled ? 'İptali geri al…' : 'İptal et…'}
+                {invoice.isCancelled ? 'İptali geri al…' : 'İrsaliyeyi iptal et…'}
               </Button>
               <Button onClick={close} disabled={busy}>
                 Vazgeç
               </Button>
-              <Button variant="primary" onClick={save} loading={busy}>
+              <Button variant="primary" onClick={save} loading={busy} disabled={kaydetKapali} title={taksitSorunu ?? undefined}>
                 Kaydet
               </Button>
             </>
@@ -193,7 +234,7 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
         }
       >
         {!cancelMode ? (
-          <div className="space-y-4">
+          <div className="space-y-4" onKeyDown={enter}>
             <Field
               label="Satış kategorisi"
               hint={
@@ -304,9 +345,39 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
                       </button>
                     </div>
                   ))}
-                  <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" aria-hidden="true" />} onClick={() => setDrafts((rows) => [...rows, { dueDate: '', amountEur: '0,00' }])}>
-                    Taksit ekle
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" aria-hidden="true" />} onClick={() => setDrafts((rows) => [...rows, { dueDate: '', amountEur: '0,00' }])}>
+                      Taksit ekle
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={esitDagit}
+                      disabled={drafts.length === 0 || irsaliyeKurus === null}
+                      title="İrsaliye tutarını taksitlere eşit paylaştırır; tarihler değişmez"
+                    >
+                      Eşit böl
+                    </Button>
+                  </div>
+                  {/* Canlı toplam: kaydetmeden önce farkı gösterir */}
+                  <div
+                    role="status"
+                    className={
+                      'rounded-lg px-3 py-2 text-xs tabular-nums ' +
+                      (taksitSorunu ? 'bg-amber-50 text-amber-900' : 'bg-emerald-50 text-emerald-800')
+                    }
+                  >
+                    <span>
+                      Taksit toplamı <strong>{formatCents(ozet.toplam)} €</strong>
+                      {irsaliyeKurus !== null && (
+                        <>
+                          {' '}
+                          · irsaliye tutarı <strong>{formatCents(irsaliyeKurus)} €</strong>
+                        </>
+                      )}
+                    </span>
+                    <span className="mt-0.5 block font-medium">{taksitSorunu ?? 'Toplam tutuyor.'}</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -324,7 +395,7 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
             {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4" onKeyDown={enter}>
             <p className="text-sm text-slate-600">
               {invoice.isCancelled
                 ? 'İptal geri alınacak; irsaliye tekrar borç hesabına girecek.'

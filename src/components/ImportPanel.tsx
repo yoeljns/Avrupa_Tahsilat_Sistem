@@ -1,9 +1,12 @@
 'use client'
 
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useRef, useState } from 'react'
+import { aktarimOzeti } from '@/lib/import/etiketler'
 
 // İki aşamalı içe aktarma paneli: dosya seç → önizleme → onayla.
+// Aktarım bitince sonuç özeti ve (inceleme bekleyen kayıt varsa) İnceleme bağlantısı çıkar.
 
 interface PreviewResult {
   batchId: string
@@ -41,7 +44,8 @@ export default function ImportPanel({ kind, title, description, accept }: Import
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'commit' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<string | null>(null)
+  /** Başarılı aktarımın özeti; `inceleme`: bu dosyadan inceleme bekleyen kayıt sayısı */
+  const [done, setDone] = useState<{ mesaj: string; ozet: string; inceleme: number } | null>(null)
 
   async function onPreview() {
     const file = fileRef.current?.files?.[0]
@@ -85,7 +89,13 @@ export default function ImportPanel({ kind, title, description, accept }: Import
         setError(body?.error ?? 'İçe aktarma başarısız.')
         return
       }
-      setDone('İçe aktarma tamamlandı ve mutabakat yeniden hesaplandı.')
+      const stats = (body?.stats ?? {}) as Record<string, unknown>
+      setDone({
+        // Bayi listesi borç hesabını etkilemez; irsaliye ve ödeme aktarımı tam hesabı kendiliğinden çalıştırır
+        mesaj: kind === 'bayiler' ? 'Bayi listesi güncellendi.' : 'İçe aktarma tamamlandı; borçlar yeniden hesaplandı.',
+        ozet: aktarimOzeti(stats),
+        inceleme: kind === 'bayiler' ? 0 : (preview.counts.needs_review ?? 0) + (typeof stats.conflicts === 'number' ? stats.conflicts : 0),
+      })
       setPreview(null)
       setFileName(null)
       if (fileRef.current) fileRef.current.value = ''
@@ -103,13 +113,15 @@ export default function ImportPanel({ kind, title, description, accept }: Import
       <p className="mt-1 text-sm text-slate-500">{description}</p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <label className="cursor-pointer rounded-lg border border-dashed border-slate-400 bg-slate-50 px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-100">
+        {/* Dosya kutusu görünmez ama odaklanabilir: Tab ile gelinir, Boşluk / Enter dosya seçiciyi açar */}
+        <label className="max-w-full cursor-pointer truncate rounded-lg border border-dashed border-slate-400 bg-slate-50 px-4 py-2.5 text-sm text-slate-600 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-200 hover:bg-slate-100">
           {fileName ?? 'Dosya seç…'}
           <input
             ref={fileRef}
             type="file"
             accept={accept}
-            className="hidden"
+            aria-label={`${title}: dosya seç`}
+            className="sr-only"
             onChange={(e) => {
               setFileName(e.target.files?.[0]?.name ?? null)
               setPreview(null)
@@ -128,7 +140,20 @@ export default function ImportPanel({ kind, title, description, accept }: Import
       </div>
 
       {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {done && <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{done}</p>}
+      {done && (
+        <div role="status" className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <p className="font-medium">{done.mesaj}</p>
+          {done.ozet && <p className="mt-0.5 text-xs text-emerald-700">{done.ozet}</p>}
+          {done.inceleme > 0 && (
+            <p className="mt-2">
+              <Link href="/inceleme" className="inline-flex items-center rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600">
+                İncelemeye git ({done.inceleme})
+              </Link>
+              <span className="ml-2 text-xs text-emerald-700">Bu dosyadan {done.inceleme} kayıt karar bekliyor.</span>
+            </p>
+          )}
+        </div>
+      )}
 
       {preview && (
         <div className="mt-4 rounded-xl border border-slate-200 p-4">

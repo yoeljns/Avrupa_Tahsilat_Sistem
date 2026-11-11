@@ -8,8 +8,8 @@ Boya/hırdavat toptan satışı için **alacak ve tahsilat takip sistemi**. Sat�
 ## Ne yapar?
 
 - **İrsaliye içe aktarma (.xls):** Satış kategorisini **tanıma kurallarıyla** (Belge No / Türü
-  kolonu), Ödeme Planı'ndan vade tarihlerini otomatik çözer. Desteklenen plan biçimleri: `NAKİT` · `05.03.2026` · `05/3-4-5` (aylar listesi) ·
-  `05/ 4--8--12` (**çift çizgi = aralık**: 4'ten 12'ye tüm aylar) · boş (vade = irsaliye tarihi,
+  kolonu), Ödeme Planı'ndan vade tarihlerini otomatik çözer. Desteklenen plan biçimleri: `NAKİT` · `05.03.2026` · `.30` (irsaliye tarihinden 30 gün sonra) · `05/3-4-5` (aylar listesi) ·
+  `05/ 4--8--12` (**çift çizgi = aralık**: 4'ten 12'ye tüm aylar) · `05/ 11-12-1` (yıl geçişi) · boş (vade = irsaliye tarihi,
   "tarih girilmedi" işaretiyle). Çok aylı planlarda tutar taksitlere **eşit bölünür**, küsurat son taksite eklenir.
 - **31/12 kuralı:** 31 Aralık tarihli irsaliyeler içe aktarılır ama borç hesabına **hiç katılmaz**.
 - **Ödeme içe aktarma (.xlsx):** "Bağlanan Kurlar" yedeğinin PEŞİN ve VADELİ sayfalarını okur.
@@ -52,6 +52,17 @@ Boya/hırdavat toptan satışı için **alacak ve tahsilat takip sistemi**. Sat�
 - **Yardım — İş Akış Prosedürü:** kimin ne yapacağı (yükleme sırası, inceleme, düzeltmeler,
   raporlar) ve yazılımın nasıl hesapladığı (kategori tanıma, taksit planı, ödemelerin borca
   işlenmesi) **Yardım** sayfasında durur; aynı içerik PDF olarak indirilir.
+- **Üst çubuk ve firma arama:** menü sayfa kayarken yerinde durur; dar ekranda açılır menüye
+  dönüşür. Sağdaki **firma arama** kutusu her sayfadan firma kartına götürür: kod ya da ad
+  yazılır (Türkçe harf ve büyük-küçük harf fark etmez), ok tuşlarıyla seçilir, Enter açar;
+  `/` tuşu kutuya odaklanır. Pazarlamacı yalnız kendi firmalarını bulur. Kullanıcı menüsünde
+  Hesabım ve Çıkış vardır.
+- **Firmalar listesi:** arama, durum süzgeci (borcu olan / vadesi geçmiş / alacaklı / temiz),
+  sorumlu süzgeci, sütun başlığına tıklayarak sıralama ve toplam satırı.
+- **Pano'da veri tazeliği uyarısı:** son ödeme kaydı 7 günden eskiyse rakamların hangi tarihe
+  kadar yüklenen dosyalara dayandığı yazar. **İçe Aktarım**'da yükleme sırası ipucu, aktarım
+  sonrası "İncelemeye git" bağlantısı ve Türkçe yükleme özeti; **irsaliye penceresi**nde elle
+  taksit girerken canlı toplam / fark ve "Eşit böl".
 - **Sorumlu atama:** **Yönetim → Bayiler ve Sorumlular**'da firmalar işaretlenip sorumlu
   (pazarlamacı) atanır ya da kaldırılır — dosya yüklemeden. Sorumlu; pazarlamacının hangi
   firmaları göreceğini ve tablolardaki / Excel'deki SORUMLU sütununu belirler; borç hesabını

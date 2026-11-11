@@ -3,11 +3,12 @@ import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationN
 import RecomputeButton from '@/components/RecomputeButton'
 import StatCard from '@/components/StatCard'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
-import { eur, trDateTime } from '@/lib/format'
+import { eur, todayISO, trDate, trDateTime } from '@/lib/format'
 import { tetikAdi } from '@/lib/kosuEtiketleri'
-import { panoOzeti, type PanoOzeti } from '@/lib/queries'
+import { panoOzeti, veriTazeligi, type PanoOzeti, type VeriTazeligi } from '@/lib/queries'
 import { renkOf } from '@/lib/renkler'
 import { createServerSupabase } from '@/lib/supabase/server'
+import { tazelikDurumu } from '@/lib/tazelik'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,10 +17,12 @@ export default async function DashboardPage() {
   const staff = isStaffRole(session.role)
   const supabase = await createServerSupabase()
 
-  // TEK ağ turu: bakiyeler, vade pencereleri (bugüne göre canlı) ve inceleme sayısı
+  // TEK ağ turu: bakiyeler, vade pencereleri (bugüne göre canlı) ve inceleme sayısı.
+  // Veri tazeliği aynı anda (paralel) sorulur; alınamazsa yalnız uyarı gösterilmez.
   let ozet: PanoOzeti
+  let tazelik: VeriTazeligi | null
   try {
-    ozet = await panoOzeti(supabase)
+    ;[ozet, tazelik] = await Promise.all([panoOzeti(supabase), veriTazeligi(supabase).catch(() => null)])
   } catch (e) {
     if (isMissingRelationError(e)) return <MigrationNeeded />
     throw e
@@ -62,14 +65,15 @@ export default async function DashboardPage() {
           .map((k) => k.ad)
           .join(' + ') || varsayilan
   const kartlar = kategoriler.filter((k) => k.panoda_kart)
+  const taze = tazelikDurumu(tazelik, todayISO())
 
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-bold text-slate-900">Pano</h1>
-        <div className="flex items-center gap-3 text-xs text-slate-500">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
           {ozet.kosu && (
-            <span>
+            <span className="min-w-0">
               Son hesap: {trDateTime(sonGuncelleme)} · tam hesap {trDateTime(ozet.kosu.started_at)} (
               {tetikAdi(ozet.kosu.trigger_kind)}, {ozet.kosu.triggered_by ?? '—'})
             </span>
@@ -81,6 +85,35 @@ export default async function DashboardPage() {
           {staff && <RecomputeButton />}
         </div>
       </div>
+
+      {/* Veriler eskiyse: rakamlar son yüklenen dosyalara kadar olanı gösterir */}
+      {taze?.eski && (
+        <div role="status" className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>
+            <strong className="font-semibold">Veriler güncel olmayabilir.</strong>{' '}
+            {tazelik?.son_odeme_tarihi ? (
+              <>
+                Son ödeme kaydı {trDate(tazelik.son_odeme_tarihi)} tarihli ({taze.odemeYasi} gün önce)
+              </>
+            ) : (
+              <>Sistemde ödeme kaydı yok</>
+            )}
+            {tazelik?.son_irsaliye_tarihi && <>; son irsaliye {trDate(tazelik.son_irsaliye_tarihi)}</>}. Borç ve tahsilat rakamları bu tarihe kadar yüklenen dosyalara göredir.
+          </p>
+          <p className="mt-1 text-xs text-amber-800">
+            {staff ? (
+              <>
+                Güncel durum için yeni irsaliye ve ödeme dosyalarını yükleyin:{' '}
+                <Link href="/ice-aktarim" className="font-semibold underline">
+                  İçe Aktarım
+                </Link>
+              </>
+            ) : (
+              'Yeni dosyaları tahsilat yöneticisi yükler; yüklenince rakamlar kendiliğinden güncellenir.'
+            )}
+          </p>
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Konsinye Açık Borç" value={eur(b?.vadeli_acik ?? 0)} sub={adlar('VADELI', 'Konsinye + Konsinye Peşin')} />

@@ -19,6 +19,7 @@ import {
   type Hucre,
   type Sutun,
 } from '@/lib/pdf/parcalar'
+import { ESKI_VERI_GUNU } from '@/lib/tazelik'
 import { RAPOR_TURLERI, aylariDerle, type RaporFirma, type RaporTuru, type TahsilatDurumu } from './tahsilatDurumu'
 import { kisaUnvan } from './unvan'
 
@@ -32,8 +33,6 @@ import { kisaUnvan } from './unvan'
 // Hiçbir firmaya sorumlu atanmamışsa "Sorumlu" sütunu ve sorumlu kırılımı çizilmez.
 
 const YAS_RENKLERI = ['#94a3b8', '#fbbf24', '#f97316', '#ef4444', '#991b1b']
-/** Veri bu kadar günden eskiyse ilk sayfada uyarı çıkar */
-const ESKI_VERI_GUNU = 7
 
 const para = (v: number): string => formatCents(v)
 const yuzde = (pay: number, payda: number): string => (payda > 0 ? `%${Math.round((pay / payda) * 100)}` : '—')

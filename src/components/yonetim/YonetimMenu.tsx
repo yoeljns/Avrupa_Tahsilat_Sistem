@@ -92,7 +92,7 @@ export default function YonetimMenu({ yonetici, sahip }: { yonetici: boolean; sa
       </nav>
 
       {/* Geniş ekran: solda gruplu menü */}
-      <nav aria-label="Yönetim" className="sticky top-6 hidden space-y-5 lg:block print:hidden">
+      <nav aria-label="Yönetim" className="sticky top-20 hidden max-h-[calc(100vh-6rem)] space-y-5 overflow-y-auto lg:block print:hidden">
         {liste.map((g) => (
           <div key={g.baslik} className={g.tehlikeli ? 'border-t border-red-100 pt-4' : ''}>
             <p className={'px-3 text-[11px] font-semibold tracking-wider uppercase ' + (g.tehlikeli ? 'text-red-500' : 'text-slate-400')}>{g.baslik}</p>

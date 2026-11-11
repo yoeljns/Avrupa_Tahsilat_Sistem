@@ -194,7 +194,7 @@ export const PROSEDUR: Prosedur = {
         {
           tur: 'paragraf',
           metin:
-            'Bir irsaliyeyi düzeltmek için firma kartında irsaliyenin yanındaki **Düzenle** düğmesini kullanın. Değiştirebilecekleriniz: satış kategorisi, EUR tutarı, vade planı, taksitler (elle; toplamı irsaliye tutarına eşit olmalıdır) ve iptal.',
+            'Bir irsaliyeyi düzeltmek için firma kartında irsaliyenin yanındaki **Düzenle** düğmesini kullanın. Değiştirebilecekleriniz: satış kategorisi, EUR tutarı, vade planı, taksitler (elle; toplamı irsaliye tutarına eşit olmalıdır) ve iptal. Taksitleri elle düzenlerken pencere toplamı ve irsaliye tutarıyla farkını gösterir; **Eşit böl** tutarı taksitlere eşit paylaştırır. Fark sıfır olmadan kaydedilmez.',
         },
         {
           tur: 'liste',
@@ -393,7 +393,16 @@ export const PROSEDUR: Prosedur = {
           genislikler: [3, 5, 5],
           basliklar: ['Ekran', 'Ne gösterir', 'İpucu'],
           satirlar: [
-            ['**Pano**', 'Genel durum: açık borç, vadesi geçmiş, yaklaşan vadeler, alacak, toplam tahsilat.', 'Üstte son hesabın zamanı yazar. Kategori kartlarına tıklayınca ilgili sayfa süzülmüş açılır.'],
+            [
+              '**Üst çubuk — Firma ara**',
+              'Her sayfadan firma kartına kısa yol: firmanın kodu ya da adı yazılır.',
+              'Türkçe harf ve büyük-küçük harf fark etmez ("cagpas" yazınca ÇAĞPAŞ bulunur). "/" tuşu arama kutusuna götürür; ok tuşlarıyla seçip Enter ile açın.',
+            ],
+            [
+              '**Pano**',
+              'Genel durum: açık borç, vadesi geçmiş, yaklaşan vadeler, alacak, toplam tahsilat.',
+              'Üstte son hesabın zamanı yazar. Son ödeme kaydı bir haftadan eskiyse sarı bir uyarı çıkar: rakamlar o tarihe kadar yüklenen dosyalara göredir. Kategori kartlarına tıklayınca ilgili sayfa süzülmüş açılır.',
+            ],
             [
               '**Konsinye → Takvim**',
               'Seçilen ayın vadeleri; satır firma, sütun vade günü ya da haftası.',
@@ -405,14 +414,22 @@ export const PROSEDUR: Prosedur = {
               'Borcu kapanmış geçmiş aylar gizli gelir; "Kapanan ayları göster" ile açılır. Kırmızı köşe işareti, başlıktaki tarihten farklı bir vade olduğunu gösterir. Satıra tıklayınca satır işaretlenir.',
             ],
             ['**Peşin**', 'Peşin satışların borcu ve yaşlandırması.', 'Peşin borç, ödemelerin ilk kapattığı borçtur.'],
-            ['**Firmalar**', 'Bütün firmalar: peşin ve konsinye borç, vadesi geçmiş, alacak, ilk vade.', 'Koda tıklayınca firma kartı açılır.'],
+            [
+              '**Firmalar**',
+              'Bütün firmalar: peşin ve konsinye borç, toplam borç, vadesi geçmiş, alacak, ilk vade; en altta toplam satırı.',
+              'Arama kutusu, durum süzgeci (borcu olanlar, vadesi geçmiş, alacaklı) ve sorumlu süzgeci vardır. Sütun başlığına tıklayınca o sütuna göre sıralanır. Koda ya da ada tıklayınca firma kartı açılır.',
+            ],
             [
               '**Firma kartı**',
               'İrsaliyeler, vade takvimi, ödemeler ve her ödemenin hangi irsaliyeye işlendiği.',
               'Düzeltmeler buradan yapılır. Ödenmiş geçmiş aylar katlanmış gelir.',
             ],
             ['**Raporlar**', 'Bütün indirmeler: PDF rapor, Excel\'ler, bu prosedür.', 'PDF raporun türünü, sorumluyu ve dönemi indirmeden önce seçin.'],
-            ['**İçe Aktarım**', 'İrsaliye ve ödeme dosyalarının yüklenmesi; son yüklemelerin listesi.', 'Önce Önizle, sonra Onayla ve Aktar.'],
+            [
+              '**İçe Aktarım**',
+              'İrsaliye ve ödeme dosyalarının yüklenmesi; son yüklemelerin listesi.',
+              'Önce Önizle, sonra Onayla ve Aktar. Aktarım bitince karar bekleyen kayıt varsa "İncelemeye git" düğmesi çıkar.',
+            ],
             ['**İnceleme**', 'Karar bekleyen kayıtlar, sekme sekme.', 'Sekmelerdeki sayılar sıfır olmalıdır.'],
             [
               '**Yönetim**',

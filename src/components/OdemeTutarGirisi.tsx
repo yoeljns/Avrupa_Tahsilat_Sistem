@@ -43,10 +43,14 @@ export default function OdemeTutarGirisi({ id, islemKodu, durum, gelenTl, oneriK
       toast(basari)
       setDeger('')
       router.refresh()
+    } catch {
+      toast('Sunucuya ulaşılamadı; tutar kaydedilmedi. Bağlantınızı kontrol edip yeniden deneyin.', 'hata')
     } finally {
       setMesgul(false)
     }
   }
+
+  const kaydet = () => gonder({ amountEur: deger.trim() }, `${islemKodu}: tutar kaydedildi, firma yeniden hesaplandı.`)
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -59,6 +63,12 @@ export default function OdemeTutarGirisi({ id, islemKodu, durum, gelenTl, oneriK
         aria-label={`${islemKodu} EUR tutarı`}
         value={deger}
         onChange={(e) => setDeger(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter = Kaydet (kutu doluyken)
+          if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+          e.preventDefault()
+          if (!mesgul && deger.trim() !== '') void kaydet()
+        }}
         placeholder={durum === 'eksik' ? 'örn. 17.382,63' : 'Yeni EUR'}
         inputMode="decimal"
         boyut="sm"
@@ -82,7 +92,7 @@ export default function OdemeTutarGirisi({ id, islemKodu, durum, gelenTl, oneriK
         variant="primary"
         loading={mesgul}
         disabled={mesgul || deger.trim() === ''}
-        onClick={() => gonder({ amountEur: deger.trim() }, `${islemKodu}: tutar kaydedildi, firma yeniden hesaplandı.`)}
+        onClick={kaydet}
       >
         Kaydet
       </Button>

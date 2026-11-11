@@ -1,7 +1,10 @@
 'use client'
 
+import { YoneticiyeOzel } from '@/components/Oturum'
+
 // Genel hata sınırı — beklenmeyen sunucu hatalarında beyaz ekran yerine
-// Türkçe açıklama ve kurtarma seçenekleri gösterir.
+// Türkçe açıklama ve kurtarma seçenekleri gösterir. Veritabanı güncelleme
+// talimatı yalnız yöneticiye gösterilir; diğer roller yöneticiye yönlendirilir.
 
 export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
@@ -10,12 +13,16 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
       <p className="mt-2 text-sm text-slate-600">
         Sayfa yüklenirken beklenmeyen bir hata oluştu. Bu genellikle geçicidir; tekrar deneyin.
       </p>
-      <p className="mt-2 text-sm text-slate-600">
-        Hata sürüyorsa ve sistemi yeni güncellediyseniz, Supabase SQL Editor&apos;de{' '}
-        <code className="rounded bg-slate-100 px-1">supabase/migrations</code> klasöründeki{' '}
-        <strong>0002 → 0010</strong> dosyalarını sırayla çalıştırıp{' '}
-        <strong>Pano → Yeniden Hesapla</strong>&apos;ya basın (README, adım 4).
-      </p>
+      <YoneticiyeOzel
+        yoksa={<p className="mt-2 text-sm text-slate-600">Hata sürerse sistem yöneticinize haber verin{error.digest ? ' ve aşağıdaki hata kodunu iletin' : ''}.</p>}
+      >
+        <p className="mt-2 text-sm text-slate-600">
+          Hata sürüyorsa ve sistemi yeni güncellediyseniz, Supabase SQL Editor&apos;de{' '}
+          <code className="rounded bg-slate-100 px-1">supabase/migrations</code> klasöründeki{' '}
+          <strong>0002 → 0010</strong> dosyalarını sırayla çalıştırıp{' '}
+          <strong>Pano → Yeniden Hesapla</strong>&apos;ya basın (README, adım 4).
+        </p>
+      </YoneticiyeOzel>
       {error.digest && <p className="mt-3 text-xs text-slate-400">Hata kodu: {error.digest}</p>}
       <button
         onClick={reset}
