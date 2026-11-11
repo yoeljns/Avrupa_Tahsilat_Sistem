@@ -440,3 +440,24 @@ export interface SorumluSecenekleri {
 export function sorumluSecenekleri(supabase: SupabaseClient): Promise<SorumluSecenekleri | null> {
   return rpc<SorumluSecenekleri | null>(supabase, 'rpc_sorumlu_secenekleri')
 }
+
+// ---------------------------------------------------------------------------
+// Tahsilat Durum Raporu (0010)
+// ---------------------------------------------------------------------------
+/** [firma_id, 'YYYY-AA' | null (tarihsiz ödeme), borca işlenen tutar, ayın son ödeme günü] */
+export type RaporTahsilatSatiri = [string, string | null, number, string | null]
+
+export interface RaporVerisi {
+  /** iki taraf (PESIN + VADELI), dökümsüz */
+  bakiye: BakiyeVerisi
+  /** güncel hesabın tahsisleri: firma × ödeme ayı */
+  tahsilat: RaporTahsilatSatiri[]
+  pano: PanoOzeti
+  /** yönetim dışındaki rollere null */
+  yonetim: YonetimOzeti | null
+}
+
+/** PDF raporun bütün verisi — tek tur; RLS: pazarlamacı yalnız kendi firmaları. */
+export function raporVerisi(supabase: SupabaseClient, bugun = todayISO()): Promise<RaporVerisi> {
+  return rpc<RaporVerisi>(supabase, 'rpc_rapor_verisi', { p_bugun: bugun })
+}

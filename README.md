@@ -39,6 +39,19 @@ Boya/hırdavat toptan satışı için **alacak ve tahsilat takip sistemi**. Sat�
   gizli sütunları, notları ve **formülleriyle** indirir (sayfalar: *Vadeli Bakiyeler*, *ALACAKLILAR*,
   *Taksit Dökümü*, *Bilgi*). Her rol indirebilir; pazarlamacının dosyasında yalnız kendi firmaları
   olur. SENET ÇEK sütunu elle doldurulmak üzere boş gelir.
+- **Raporlar sayfası ve PDF "Tahsilat Durum Raporu":** bütün indirmeler **Raporlar** sayfasında
+  toplanır. PDF rapor üç türdedir, indirirken seçilir — **Kısa özet** (tek sayfa: ana rakamlar,
+  yaşlandırma, en çok geciken 10 firma), **Yönetim özeti** (+ kategori ve sorumlu kırılımı, aylara
+  göre vade / tahsilat, dönem tahsilatı, veri uyarıları) ve **Ayrıntılı** (+ her sorumlu için firma
+  firma liste, alacaklı firmalar). Sorumluya ve döneme göre süzülür. Her rol indirebilir;
+  pazarlamacının raporu yalnız kendi firmalarını içerir. Rapordaki rakamlar Pano ve Excel ile aynı
+  kaynaktan gelir (*toplam tahsilat = borca işlenen ödeme + alacak*). Uzun firma unvanları PDF
+  tablolarında tek satıra kısaltılır ("… LİMİTED ŞİRKETİ" → "… LTD. ŞTİ.", sığmazsa "…"); firmayı
+  kodu tanımlar, tam unvan uygulamadadır. Hiçbir firmaya sorumlu atanmamışsa "Sorumlu" sütunu ve
+  sorumlu kırılımı çizilmez; aylık tabloda 12 aydan eski aylar tek satırda toplanır.
+- **Yardım — İş Akış Prosedürü:** kimin ne yapacağı (yükleme sırası, inceleme, düzeltmeler,
+  raporlar) ve yazılımın nasıl hesapladığı (kategori tanıma, taksit planı, ödemelerin borca
+  işlenmesi) **Yardım** sayfasında durur; aynı içerik PDF olarak indirilir.
 - **Sorumlu atama:** **Yönetim → Bayiler ve Sorumlular**'da firmalar işaretlenip sorumlu
   (pazarlamacı) atanır ya da kaldırılır — dosya yüklemeden. Sorumlu; pazarlamacının hangi
   firmaları göreceğini ve tablolardaki / Excel'deki SORUMLU sütununu belirler; borç hesabını
@@ -91,7 +104,8 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: **`supabase/migrations/0001_init.sql`** →
    **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** → **`0004_hiz.sql`** →
    **`0005_hiz_rls.sql`** → **`0006_takvim.sql`** → **`0007_kategoriler.sql`** →
-   **`0008_duzeltmeler.sql`** → **`0009_bakiye_tablosu.sql`** (her birinin içeriğini yapıştırıp **Run**).
+   **`0008_duzeltmeler.sql`** → **`0009_bakiye_tablosu.sql`** → **`0010_rapor.sql`** (her birinin
+   içeriğini yapıştırıp **Run**).
 3. Hepsinde "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
 
 > **Sistemi daha önce kurduysanız (güncelleme):** yalnız henüz çalıştırmadığınız migration
@@ -153,7 +167,7 @@ yeniden hesaplanır.
 | `/setup` "Kurulum daha önce tamamlanmış" diyor | Normal — kullanıcılar zaten oluşturulmuş. Yeni kullanıcı/şifre işlemleri **Yönetim → Kullanıcılar**'dan yapılır. |
 | Pazarlamacı hiç firma göremiyor | Firmaların sorumlu e-postası ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayiler ve Sorumlular**'da firmaları işaretleyip **Sorumlu ata** deyin (ya da bayi listesini güncelleyip yeniden yükleyin). |
 | Excel'de / tablolarda SORUMLU sütunu boş | Firmalara henüz sorumlu atanmamış. **Yönetim → Bayiler ve Sorumlular** → "Sorumlusu olmayanlar" süzgeci → işaretleyip atayın. |
-| "Excel'e aktar" hata veriyor | `https://<adresiniz>/api/saglik?belge=1` açın: `belge.excel.ok` **true** olmalı (sunucu örnek bir dosya üretip boyutunu döndürür). "Veritabanı güncellemesi (0009) uygulanmamış" iletisi geliyorsa 4. adımdaki `0009_bakiye_tablosu.sql`'i çalıştırın. |
+| "Excel'e aktar" ya da "PDF indir" hata veriyor | `https://<adresiniz>/api/saglik?belge=1` açın: `belge.excel.ok` ve `belge.pdf.ok` **true** olmalı (sunucu örnek birer dosya üretip boyutlarını döndürür). "Veritabanı güncellemesi (0009 / 0010) uygulanmamış" iletisi geliyorsa 4. adımdaki ilgili dosyayı çalıştırın. |
 | İçe aktarma "yetkiniz yok" diyor | İçe aktarmayı yalnız Yönetici ve Tahsilat Yöneticisi yapabilir. |
 | Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı hemen tazeleyebilirsiniz (her gece kendiliğinden de yapılır). EUR tutarı boş ödemeler hiçbir borca yazılmaz: **İnceleme → Ödeme Tutarı**'ndan EUR girin. **Yönetim → Genel Bakış** veri sağlığını tek ekranda gösterir. |
 | Çok sayıda irsaliye "Sınıflandırılmadı" | **Yönetim → Tanıma Kuralları**: sağdaki "Tanınmayan Belge No kalıpları"na tıklayın, deneme kutusunda sonucu görün, uygun kuralı ekleyip **Etkiyi önizle → Kaydet ve uygula**. |
@@ -180,6 +194,14 @@ npm run build        # üretim derlemesi
   `src/lib/export/exceljsYaz.ts` yalnız dosyaya aktarır. Ekrandaki tablo, Excel ve raporlar aynı
   modelden (`src/lib/bakiye/model.ts`) beslenir. `exceljs` derlemeye gömülür; `next.config`'te
   `serverExternalPackages`e **eklemeyin** (dosya izleme bir alt bağımlılığı kaçırır, canlıda 500 verir).
+- PDF (`pdfmake`): `src/lib/pdf/pdf.ts` (yazı tipi bellekten, adres ve dosya erişimi kapalı) ve
+  `src/lib/pdf/parcalar.ts` (ortak parçalar). Rapor sayıları saf `src/lib/rapor/tahsilatDurumu.ts`
+  içinde kurulur; belge kurucu yalnız dizer. Prosedürün içeriği tek kaynaktadır
+  (`src/lib/yardim/icerik.ts`); Yardım sayfası ve PDF ondan üretilir. `pdfmake` de derlemeye gömülür.
+  pdfmake taşan metni kesmez (alt satıra indirir); tek satırda kalması gereken hücreler
+  `src/lib/pdf/olcu.ts` (Roboto harf genişlikleri, `sigdir`) ve `src/lib/rapor/unvan.ts`
+  (`kisaUnvan`) ile sütun genişliğine sığdırılır. Yazı tipinde olmayan karakterler (→ gibi)
+  `src/lib/pdf/karakter.ts` içinde eşdeğeriyle değiştirilir; testler belgedeki bütün metinleri denetler.
 - Veritabanı entegrasyon testleri (yerel PostgreSQL; tüm migration'lar sırayla kurulur — RLS,
   sayfa fonksiyonları, kategori/kural akışları): `PG_TEST_SOCKET=/tmp/pgs npm test`
 - Gerçek dosyalarla entegrasyon testleri: `PG_TEST_SOCKET=... IRSALIYE_FILE=... ODEMELER_FILE=... BAYILER_FILE=... npm test`

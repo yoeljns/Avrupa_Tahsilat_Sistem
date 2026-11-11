@@ -32,8 +32,13 @@ export function suzgecSorgusu(s: BakiyeSuzgec = BOS_BAKIYE_SUZGEC): string {
   return q ? `?${q}` : ''
 }
 
+/** Dosya adına eklenecek sorumlu parçası (yalnız ASCII): 'ERCAN' | 'SORUMLUSUZ' | '' */
+export function sorumluDosyaEki(sorumlu: string): string {
+  return sorumlu === SORUMLUSUZ ? 'SORUMLUSUZ' : sade(sorumlu).replace(/[^A-Z0-9]/g, '').slice(0, 30)
+}
+
 /** İndirilen dosyanın adı: vadeli_bakiyeler[_SORUMLU]_YYYY-AA-GG.xlsx (yalnız ASCII) */
 export function vadeliBakiyelerDosyaAdi(bugun: string, s: BakiyeSuzgec = BOS_BAKIYE_SUZGEC): string {
-  const kim = s.sorumlu === SORUMLUSUZ ? 'SORUMLUSUZ' : sade(s.sorumlu).replace(/[^A-Z0-9]/g, '').slice(0, 30)
+  const kim = sorumluDosyaEki(s.sorumlu)
   return `vadeli_bakiyeler_${kim ? kim + '_' : ''}${bugun}.xlsx`
 }

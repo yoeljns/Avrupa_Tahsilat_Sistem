@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { supabaseAnonKey, supabaseUrl } from '@/lib/env'
-import { excelSinamasi } from '@/lib/export/belgeSinamasi'
+import { excelSinamasi, pdfSinamasi } from '@/lib/export/belgeSinamasi'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -11,8 +11,9 @@ export const dynamic = 'force-dynamic'
 // yer: aynı bölgedeyse HTTPS turu ~30-40 ms, okyanus aşırıysa ~100+ ms olur.
 //
 // ?belge=1 → belge kütüphanelerinin öz-sınaması: UYDURMA örnek veriden küçük bir
-// Excel dosyası üretilir, yalnız boyutu döner (gerçek veri yok). Yayından sonra
-// kütüphanelerin sunucuda yüklendiğini oturum açmadan doğrulamak içindir.
+// Excel ve bir PDF dosyası üretilir, yalnız boyutları döner (gerçek veri yok).
+// Yayından sonra kütüphanelerin ve yazı tipinin sunucuda yüklendiğini oturum
+// açmadan doğrulamak içindir.
 
 export async function GET(request: Request) {
   const belgeIstendi = new URL(request.url).searchParams.get('belge') === '1'
@@ -34,10 +35,10 @@ export async function GET(request: Request) {
     turlar = []
   }
   const enHizli = turlar.length > 0 ? Math.min(...turlar) : null
-  const belge = belgeIstendi ? { excel: await excelSinamasi() } : undefined
+  const belge = belgeIstendi ? { excel: await excelSinamasi(), pdf: await pdfSinamasi() } : undefined
   return NextResponse.json(
     {
-      durum: hata || (belge && !belge.excel.ok) ? 'hata' : 'ok',
+      durum: hata || (belge && !(belge.excel.ok && belge.pdf.ok)) ? 'hata' : 'ok',
       sunucu_bolgesi: bolge,
       veritabani_tur_ms: turlar,
       en_hizli_tur_ms: enHizli,

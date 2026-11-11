@@ -1,13 +1,14 @@
 import { kitapYaz } from '@/lib/export/exceljsYaz'
 import { vadeliBakiyelerPlanlari } from '@/lib/export/vadeliBakiyeler'
 import { todayISO } from '@/lib/format'
+import { pdfUret } from '@/lib/pdf/pdf'
 import { VARSAYILAN_KATEGORILER } from '@/lib/kategoriMeta'
 import type { BakiyeVerisi } from '@/lib/queries'
 
 // BELGE ÖZ-SINAMASI — /api/saglik?belge=1
-// Belge kütüphanelerinin (Excel yazıcısı) bu sunucuda yüklenip çalıştığını
-// kanıtlar: UYDURMA örnek veriden küçük bir dosya üretir ve yalnız boyutunu
-// döndürür. Veritabanına gitmez, gerçek veri içermez.
+// Belge kütüphanelerinin (Excel ve PDF yazıcıları) bu sunucuda yüklenip
+// çalıştığını kanıtlar: UYDURMA örnek veriden küçük birer dosya üretir ve yalnız
+// boyutlarını döndürür. Veritabanına gitmez, gerçek veri içermez.
 //
 // Neden var: kütüphaneler dağıtım paketine dosya izlemeyle girer; izleme bir
 // dosyayı kaçırırsa hata yalnız canlıda, ilk indirmede görünür. Bu sınama
@@ -60,6 +61,30 @@ export async function excelSinamasi(simdi: Date = new Date()): Promise<SinamaSon
     const baytlar = await kitapYaz(planlar)
     // .xlsx bir zip dosyasıdır: 'PK' ile başlar
     const gecerli = baytlar.length > 1000 && baytlar[0] === 0x50 && baytlar[1] === 0x4b
+    return { ok: gecerli, bayt: baytlar.length, ms: Math.round(performance.now() - t0), ...(gecerli ? {} : { hata: 'Üretilen dosya geçerli görünmüyor.' }) }
+  } catch (e) {
+    return { ok: false, ms: Math.round(performance.now() - t0), hata: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/** Küçük bir PDF üretir (Türkçe harfler, tablo, çizim); yalnız boyut ve süre döner. */
+export async function pdfSinamasi(): Promise<SinamaSonucu> {
+  const t0 = performance.now()
+  try {
+    const baytlar = await pdfUret({
+      pageSize: 'A4',
+      defaultStyle: { font: 'Roboto', fontSize: 9 },
+      content: [
+        { text: 'Belge öz-sınaması — ĞÜŞİÖÇ ğüşıöç', fontSize: 14, bold: true },
+        { canvas: [{ type: 'rect', x: 0, y: 6, w: 200, h: 8, color: '#10b981' }] },
+        {
+          margin: [0, 10, 0, 0],
+          table: { headerRows: 1, widths: ['*', 80], body: [[{ text: 'Firma', bold: true }, { text: 'Kalan', bold: true, alignment: 'right' }], ['ÖRNEK ŞİRKETİ', { text: '1.234,56', alignment: 'right' }]] },
+          layout: 'lightHorizontalLines',
+        },
+      ],
+    })
+    const gecerli = baytlar.length > 1000 && baytlar.subarray(0, 5).toString('latin1') === '%PDF-'
     return { ok: gecerli, bayt: baytlar.length, ms: Math.round(performance.now() - t0), ...(gecerli ? {} : { hata: 'Üretilen dosya geçerli görünmüyor.' }) }
   } catch (e) {
     return { ok: false, ms: Math.round(performance.now() - t0), hata: e instanceof Error ? e.message : String(e) }

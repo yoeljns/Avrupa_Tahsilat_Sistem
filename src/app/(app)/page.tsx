@@ -74,17 +74,11 @@ export default async function DashboardPage() {
               {tetikAdi(ozet.kosu.trigger_kind)}, {ozet.kosu.triggered_by ?? '—'})
             </span>
           )}
-          {staff && (
-            <>
-              <a href="/api/export/borclar" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                Borç Raporu (Excel)
-              </a>
-              <a href="/api/export/tahsilat-detay" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                Tahsilat Detayı (Excel)
-              </a>
-              <RecomputeButton />
-            </>
-          )}
+          {/* Bütün indirmeler (PDF tahsilat durum raporu, Excel'ler) Raporlar sayfasında */}
+          <Link href="/raporlar" className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Raporlar (PDF / Excel)
+          </Link>
+          {staff && <RecomputeButton />}
         </div>
       </div>
 

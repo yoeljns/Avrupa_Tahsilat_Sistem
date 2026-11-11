@@ -14,9 +14,11 @@ const LINKS: Array<{ href: string; label: string; roles: Role[] }> = [
   { href: '/konsinye', label: 'Konsinye', roles: ['yonetici', 'tahsilat_yoneticisi', 'pazarlamaci'] },
   { href: '/pesin', label: 'Peşin', roles: ['yonetici', 'tahsilat_yoneticisi', 'pazarlamaci'] },
   { href: '/firmalar', label: 'Firmalar', roles: ['yonetici', 'tahsilat_yoneticisi', 'pazarlamaci'] },
+  { href: '/raporlar', label: 'Raporlar', roles: ['yonetici', 'tahsilat_yoneticisi', 'pazarlamaci'] },
   { href: '/ice-aktarim', label: 'İçe Aktarım', roles: ['yonetici', 'tahsilat_yoneticisi'] },
   { href: '/inceleme', label: 'İnceleme', roles: ['yonetici', 'tahsilat_yoneticisi'] },
   { href: '/yonetim', label: 'Yönetim', roles: ['yonetici', 'tahsilat_yoneticisi'] },
+  { href: '/yardim', label: 'Yardım', roles: ['yonetici', 'tahsilat_yoneticisi', 'pazarlamaci'] },
 ]
 
 const ROLE_LABELS: Record<Role, string> = {

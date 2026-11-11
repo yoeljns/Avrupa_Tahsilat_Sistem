@@ -30,6 +30,8 @@ interface InvoiceActionsProps {
     odemePlaniRaw: string
     /** Yöneticinin daha önce girdiği plan (varsa) — ham plandan önceliklidir */
     planOverride?: string | null
+    /** İade irsaliyesi ve henüz borca eklenmemiş (kategori açıkça seçilmemiş) */
+    iadeBorcDisi?: boolean
     installments: Array<{ dueDate: string; amountCents: number; source: string }>
   }
   /** Satış kategorileri (yönetim panelinden); yoksa varsayılanlar */
@@ -59,6 +61,8 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
     invoice.installments.map((t) => ({ dueDate: t.dueDate, amountEur: formatCents(t.amountCents) })),
   )
   const [cancelMode, setCancelMode] = useState(false)
+  /** İade: seçili kategoriyle borca eklensin (kategori değişmese de seçim gönderilir) */
+  const [iadeEkle, setIadeEkle] = useState(false)
 
   const secenekler = atanabilirKategoriler(kategoriler, invoice.saleType)
   const secili = kategoriBul(kategoriler, saleType)
@@ -96,7 +100,7 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
   async function save() {
     // 1) Alan değişiklikleri
     const patch: Record<string, unknown> = {}
-    if (saleType !== invoice.saleType) patch.saleType = saleType
+    if (saleType !== invoice.saleType || (invoice.iadeBorcDisi && iadeEkle)) patch.saleType = saleType
     const currentAmount = invoice.amountEurCents !== null ? formatCents(invoice.amountEurCents) : ''
     if (amountEur.trim() && amountEur.trim() !== currentAmount) patch.amountEur = amountEur.trim()
     if (plan.trim()) patch.plan = plan.trim()
@@ -198,7 +202,14 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
                   : 'Sınıflandırılmamış irsaliye borç hesabına girmez.'
               }
             >
-              <Select value={saleType} onChange={(e) => setSaleType(e.target.value)}>
+              <Select
+                value={saleType}
+                onChange={(e) => {
+                  setSaleType(e.target.value)
+                  // iadede kategori seçmek açık seçimdir: borca eklenir
+                  if (invoice.iadeBorcDisi) setIadeEkle(true)
+                }}
+              >
                 {invoice.saleType === SINIFSIZ_KOD && <option value={SINIFSIZ_KOD}>Sınıflandırılmadı</option>}
                 {secenekler.map((o) => (
                   <option key={o.kod} value={o.kod}>
@@ -209,6 +220,19 @@ export default function InvoiceActions({ invoice, kategoriler }: InvoiceActionsP
                 ))}
               </Select>
             </Field>
+
+            {invoice.iadeBorcDisi && !hesapDisi && (
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-900">
+                <input type="checkbox" checked={iadeEkle} onChange={(e) => setIadeEkle(e.target.checked)} className="mt-0.5 h-4 w-4 accent-violet-600" />
+                <span>
+                  <strong className="font-semibold">Bu iadeyi borca ekle</strong>
+                  <span className="block text-xs text-violet-800">
+                    İade irsaliyeleri kendiliğinden borca girmez. İşaretleyip kaydederseniz seçili kategoriyle borç hesabına katılır; geri almak için irsaliyeyi
+                    iptal edin.
+                  </span>
+                </span>
+              </label>
+            )}
 
             <Field label="Tutar (EUR)">
               <Input value={amountEur} onChange={(e) => setAmountEur(e.target.value)} placeholder="51.414,86" className="tabular-nums" inputMode="decimal" />

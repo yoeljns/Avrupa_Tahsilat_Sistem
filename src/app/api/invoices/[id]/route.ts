@@ -3,14 +3,7 @@ import { z } from 'zod'
 import { apiSession } from '@/lib/auth'
 import { parseEurToCents } from '@/lib/engine/money'
 import { parseOdemePlani } from '@/lib/engine/planParser'
-import {
-  auditInvoiceChange,
-  effectiveType,
-  loadInvoiceForOps,
-  overrideDegeri,
-  refreshInstallmentSides,
-  regenerateInstallments,
-} from '@/lib/invoiceOps'
+import { auditInvoiceChange, effectiveType, loadInvoiceForOps, overrideDegeri, refreshInstallmentSides, regenerateInstallments, iadeAcikSecimi } from '@/lib/invoiceOps'
 import { kategorileriYukle } from '@/lib/kategoriler'
 import { tarafHaritasi } from '@/lib/kategoriMeta'
 import { recomputeFirms } from '@/lib/recompute'
@@ -52,7 +45,9 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
 
   const kategoriler = await kategorileriYukle(admin)
   const harita = tarafHaritasi(kategoriler)
-  if (body.saleType !== undefined && body.saleType !== effectiveType(inv)) {
+  // İade: aynı kategori de olsa açıkça seçilirse borca eklenir (seçim yazılır)
+  const iadeOnayi = body.saleType !== undefined && iadeAcikSecimi(inv, body.saleType)
+  if (body.saleType !== undefined && (body.saleType !== effectiveType(inv) || iadeOnayi)) {
     const kat = kategoriler.find((k) => k.kod === body.saleType)
     if (!kat) return NextResponse.json({ error: `Kategori bulunamadı: ${body.saleType}` }, { status: 400 })
     if (!kat.aktif) return NextResponse.json({ error: `"${kat.ad}" kategorisi pasif; önce yönetim panelinden etkinleştirin.` }, { status: 400 })
@@ -69,13 +64,14 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   let planSource: 'auto_plan' | 'default_invoice_date' = 'auto_plan'
 
   // Satış tipi
-  if (body.saleType !== undefined && body.saleType !== effectiveType(inv)) {
+  if (body.saleType !== undefined && (body.saleType !== effectiveType(inv) || iadeOnayi)) {
     audits.push({
       action: 'TIP_DEGISIKLIGI',
       field: 'satis_tipi',
-      oldValue: effectiveType(inv),
+      // iade onayında kategori değişmez; önceki "açık seçim" yoktur (boş)
+      oldValue: iadeOnayi ? null : effectiveType(inv),
       newValue: body.saleType,
-      reason: body.reason ?? null,
+      reason: body.reason ?? (iadeOnayi ? 'İade borca eklendi (kategori açıkça seçildi)' : null),
     })
     updates.sale_type_override = overrideDegeri(inv, body.saleType)
     inv.sale_type_override = overrideDegeri(inv, body.saleType)

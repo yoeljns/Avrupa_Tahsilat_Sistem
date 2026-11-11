@@ -273,6 +273,7 @@ export default async function FirmaDetayPage({
                             isCancelled: inv.is_cancelled,
                             odemePlaniRaw: inv.odeme_plani_raw,
                             planOverride: inv.plan_override_note,
+                            iadeBorcDisi: inv.is_iade && inv.sale_type_override === null,
                             installments: insts.map((t) => ({ dueDate: t.due_date, amountCents: t.amount_eur_cents, source: t.source })),
                           }}
                           kategoriler={kategoriler}

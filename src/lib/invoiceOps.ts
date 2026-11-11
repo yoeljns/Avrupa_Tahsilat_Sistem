@@ -35,8 +35,21 @@ export interface InvoiceForOps {
  * diye NULL'a indirgenirse seçim etkisiz kalıyordu.
  */
 export function overrideDegeri(inv: Pick<InvoiceForOps, 'sale_type_auto' | 'turu_raw'>, secilen: SaleType): SaleType | null {
-  const iade = normText(inv.turu_raw).includes('IADE')
-  return secilen === inv.sale_type_auto && !iade ? null : secilen
+  return secilen === inv.sale_type_auto && !iadeMi(inv) ? null : secilen
+}
+
+/** İade irsaliyesi mi? (Türü metninde 'İADE' geçer) */
+export function iadeMi(inv: Pick<InvoiceForOps, 'turu_raw'>): boolean {
+  return normText(inv.turu_raw).includes('IADE')
+}
+
+/**
+ * İadenin AYNI kategoriyle açıkça onaylanması: kategori değişmez ama seçim yazılır,
+ * böylece iade borca girer. (Farklı kategori seçmek zaten açık seçimdir.)
+ * Yalnız henüz açık seçimi olmayan iadede geçerlidir.
+ */
+export function iadeAcikSecimi(inv: Pick<InvoiceForOps, 'sale_type_auto' | 'sale_type_override' | 'turu_raw'>, secilen: SaleType): boolean {
+  return iadeMi(inv) && inv.sale_type_override === null && secilen === inv.sale_type_auto
 }
 
 export function effectiveType(inv: InvoiceForOps): SaleType {
