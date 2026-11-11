@@ -29,6 +29,20 @@ Boya/hırdavat toptan satışı için **alacak ve tahsilat takip sistemi**. Sat�
   **Excel düzeni** görünümünde her vade için **BORÇ | ÖDEME | KALAN** üçlüsü — mevcut Excel
   tablonuzla aynı düzen (Excel çıktısı da bu düzendedir). Firma arama, sorumlu / yalnız gecikmiş
   süzgeçleri, satış tipi düğmeleri, sıralama, ay listesi, sabit başlık, yazdırma ve mobil görünüm.
+- **Bakiye tablosu ve "Vadeli Bakiyeler" Excel'i:** **Konsinye → Bakiye tablosu** sekmesi, elle
+  tutulan "Vadeli ve Peşin Borç Tablosu"nun karşılığıdır: satır = firma; her vade **ayı** için
+  **VADELİ BORÇ · PEŞİN BORÇ (ayın başı) · PEŞİN BORÇ (ayın ortası) · ÖDEME · KALAN**
+  (VADELİ = Konsinye, PEŞİN = Konsinye Peşin). Aylar dönüşümlü turuncu / sarı; borcu tamamen
+  kapanmış geçmiş aylar **gizli** gelir ("Kapanan ayları göster"); camgöbeği sütun **bu aya kadar
+  kalan** toplamdır; başlıktaki tarihten farklı vadeler hücre **notu** olur; tıklanan satır sarıya
+  boyanır. **Excel'e aktar** aynı tabloyu — ekrandaki süzgeçlerle — renkleri, donmuş başlıkları,
+  gizli sütunları, notları ve **formülleriyle** indirir (sayfalar: *Vadeli Bakiyeler*, *ALACAKLILAR*,
+  *Taksit Dökümü*, *Bilgi*). Her rol indirebilir; pazarlamacının dosyasında yalnız kendi firmaları
+  olur. SENET ÇEK sütunu elle doldurulmak üzere boş gelir.
+- **Sorumlu atama:** **Yönetim → Bayiler ve Sorumlular**'da firmalar işaretlenip sorumlu
+  (pazarlamacı) atanır ya da kaldırılır — dosya yüklemeden. Sorumlu; pazarlamacının hangi
+  firmaları göreceğini ve tablolardaki / Excel'deki SORUMLU sütununu belirler; borç hesabını
+  etkilemez. Bayi listesi yeniden yüklendiğinde dosyadaki **boş** sorumlu hücresi mevcut atamayı silmez.
 - **Tahsilat Yöneticisi düzenlemeleri:** İrsaliye iptali, tutar/tip/vade değişikliği, taksitleri elle
   düzenleme. Her değişiklik **denetim kaydına** işlenir; aynı dosya yeniden yüklendiğinde
   düzenlemeler **asla ezilmez**.
@@ -77,7 +91,7 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 2. Bu depodaki migration dosyalarını SIRAYLA çalıştırın: **`supabase/migrations/0001_init.sql`** →
    **`0002_havuz_tahsis.sql`** → **`0003_kdv_eslestirme.sql`** → **`0004_hiz.sql`** →
    **`0005_hiz_rls.sql`** → **`0006_takvim.sql`** → **`0007_kategoriler.sql`** →
-   **`0008_duzeltmeler.sql`** (her birinin içeriğini yapıştırıp **Run**).
+   **`0008_duzeltmeler.sql`** → **`0009_bakiye_tablosu.sql`** (her birinin içeriğini yapıştırıp **Run**).
 3. Hepsinde "Success" görmelisiniz. (Dosyalar güvenlidir; yanlışlıkla ikinci kez çalıştırmak sorun çıkarmaz.)
 
 > **Sistemi daha önce kurduysanız (güncelleme):** yalnız henüz çalıştırmadığınız migration
@@ -115,7 +129,8 @@ Gerekenler: [GitHub](https://github.com) hesabı (bu repo), [Vercel](https://ver
 
 ### 6) Verileri yükleyin (sıra önemli)
 1. `yy@avrupagroup.com` ile giriş yapın.
-2. **Yönetim → Bayi Listesi** → bayi Excel'ini yükleyin (firma adları + pazarlamacı eşlemesi).
+2. **Yönetim → Bayiler ve Sorumlular** → bayi Excel'ini yükleyin (firma adları + pazarlamacı
+   eşlemesi). Sorumlular aynı sayfadaki tablodan da atanabilir (firmaları işaretleyin → **Sorumlu ata**).
 3. **İçe Aktarım** → sol panelden **irsaliye .xls** dosyasını yükleyin → önizlemeyi kontrol edin →
    **Onayla ve Aktar**.
 4. Aynı sayfadan **ödemeler .xlsx** dosyasını yükleyin → önizleme → **Onayla ve Aktar**.
@@ -136,7 +151,9 @@ yeniden hesaplanır.
 | "Eksik ortam değişkeni" hatası veya site sizi sürekli `/setup`'a atıyor | Vercel → Settings → Environment Variables'da Supabase anahtarlarının ve `SETUP_SECRET`'ın olduğundan emin olun (README adım 2–3), sonra **Redeploy** yapın. |
 | `/setup` "Veritabanına ulaşılamadı" diyor | 4. adımdaki SQL henüz çalıştırılmamış. `0001_init.sql`'i Supabase SQL Editor'de çalıştırın. |
 | `/setup` "Kurulum daha önce tamamlanmış" diyor | Normal — kullanıcılar zaten oluşturulmuş. Yeni kullanıcı/şifre işlemleri **Yönetim → Kullanıcılar**'dan yapılır. |
-| Pazarlamacı hiç firma göremiyor | Bayi listesindeki `pazarlamaci_email` ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayi Listesi**'nden dosyayı güncelleyin. |
+| Pazarlamacı hiç firma göremiyor | Firmaların sorumlu e-postası ile kullanıcının giriş e-postası birebir aynı olmalı. **Yönetim → Bayiler ve Sorumlular**'da firmaları işaretleyip **Sorumlu ata** deyin (ya da bayi listesini güncelleyip yeniden yükleyin). |
+| Excel'de / tablolarda SORUMLU sütunu boş | Firmalara henüz sorumlu atanmamış. **Yönetim → Bayiler ve Sorumlular** → "Sorumlusu olmayanlar" süzgeci → işaretleyip atayın. |
+| "Excel'e aktar" hata veriyor | `https://<adresiniz>/api/saglik?belge=1` açın: `belge.excel.ok` **true** olmalı (sunucu örnek bir dosya üretip boyutunu döndürür). "Veritabanı güncellemesi (0009) uygulanmamış" iletisi geliyorsa 4. adımdaki `0009_bakiye_tablosu.sql`'i çalıştırın. |
 | İçe aktarma "yetkiniz yok" diyor | İçe aktarmayı yalnız Yönetici ve Tahsilat Yöneticisi yapabilir. |
 | Rakamlar beklediğinizden farklı | **İnceleme** sayfasını kontrol edin: sınıflandırma bekleyenler, iadeler ve 31/12 kayıtları hesaplara katılmaz. Panodaki **Yeniden Hesapla** ile mutabakatı hemen tazeleyebilirsiniz (her gece kendiliğinden de yapılır). EUR tutarı boş ödemeler hiçbir borca yazılmaz: **İnceleme → Ödeme Tutarı**'ndan EUR girin. **Yönetim → Genel Bakış** veri sağlığını tek ekranda gösterir. |
 | Çok sayıda irsaliye "Sınıflandırılmadı" | **Yönetim → Tanıma Kuralları**: sağdaki "Tanınmayan Belge No kalıpları"na tıklayın, deneme kutusunda sonucu görün, uygun kuralı ekleyip **Etkiyi önizle → Kaydet ve uygula**. |
@@ -158,6 +175,11 @@ npm run build        # üretim derlemesi
 - Para hesapları EUR **tam kuruş (cent) tamsayısıyla** yapılır; TL tutarlar bilgi amaçlıdır.
 - Mutabakat sürümlüdür: her hesap yeni `recon_run` altına yazılır, sonra işaretçi çevrilir —
   yarım sonuç asla görünmez. Motor deterministiktir (aynı veri → aynı tahsis).
+- Biçimli Excel (`exceljs`): sayfanın bütün hücreleri, biçimleri ve formülleri saf bir **sayfa
+  planı** olarak kurulur (`src/lib/bakiye/sayfaPlani.ts`, exceljs içe aktarmaz — birim testli);
+  `src/lib/export/exceljsYaz.ts` yalnız dosyaya aktarır. Ekrandaki tablo, Excel ve raporlar aynı
+  modelden (`src/lib/bakiye/model.ts`) beslenir. `exceljs` derlemeye gömülür; `next.config`'te
+  `serverExternalPackages`e **eklemeyin** (dosya izleme bir alt bağımlılığı kaçırır, canlıda 500 verir).
 - Veritabanı entegrasyon testleri (yerel PostgreSQL; tüm migration'lar sırayla kurulur — RLS,
   sayfa fonksiyonları, kategori/kural akışları): `PG_TEST_SOCKET=/tmp/pgs npm test`
 - Gerçek dosyalarla entegrasyon testleri: `PG_TEST_SOCKET=... IRSALIYE_FILE=... ODEMELER_FILE=... BAYILER_FILE=... npm test`

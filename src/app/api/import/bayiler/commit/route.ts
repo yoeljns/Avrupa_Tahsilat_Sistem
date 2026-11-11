@@ -4,6 +4,7 @@ import { apiSession } from '@/lib/auth'
 import { chunkedWrite, fetchAll, writeAudit } from '@/lib/db'
 import { createAdminSupabase } from '@/lib/supabase/admin'
 import type { BayiRecord } from '@/lib/import/bayilerParser'
+import { bayiFirmaSatiri, sekleGoreGrupla } from '@/lib/import/bayiYaz'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -30,35 +31,10 @@ export async function POST(request: Request) {
   if (records.length === 0) return NextResponse.json({ error: 'Uygulanacak geçerli satır yok.' }, { status: 400 })
 
   const now = new Date().toISOString()
-  // Yalnız dosyada BULUNAN kolonlar yazılır; olmayanlar mevcut firmada korunur.
-  // (Eski önizlemelerde kolon bilgisi yoksa tüm kolonlar var sayılır.)
-  const hepsi = { segment: true, borcDurumu: true, city: true, phone: true, pazarlamaciEmail: true }
-  const satirlar = records.map((r) => {
-    const k = r.kolonlar ?? hepsi
-    const row: Record<string, unknown> = {
-      code_norm: r.codeNorm,
-      code_raw: r.codeRaw,
-      name: r.name,
-      is_auto_created: false,
-      updated_at: now,
-    }
-    if (k.segment) row.segment = r.segment || null
-    if (k.borcDurumu) row.borc_durumu = r.borcDurumu || null
-    if (k.city) row.city = r.city || null
-    if (k.phone) row.phone = r.phone || null
-    if (k.pazarlamaciEmail) row.pazarlamaci_email = r.pazarlamaciEmail || null
-    return row
-  })
-  // PostgREST tek istekte aynı kolon kümesini bekler → şekle göre grupla
-  const sekiller = new Map<string, Record<string, unknown>[]>()
-  for (const row of satirlar) {
-    const key = Object.keys(row).sort().join(',')
-    const arr = sekiller.get(key)
-    if (arr) arr.push(row)
-    else sekiller.set(key, [row])
-  }
+  // Yalnız dosyada bulunan kolonlar yazılır; boş sorumlu hücresi mevcut atamayı silmez (bkz. bayiYaz.ts)
+  const satirlar = records.map((r) => bayiFirmaSatiri(r, now))
   try {
-    for (const grup of sekiller.values()) {
+    for (const grup of sekleGoreGrupla(satirlar)) {
       await chunkedWrite(grup, (chunk) => admin.from('firms').upsert(chunk, { onConflict: 'code_norm' }))
     }
   } catch (e) {

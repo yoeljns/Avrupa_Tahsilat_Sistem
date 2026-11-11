@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import MigrationNeeded, { isMissingRelationError } from '@/components/MigrationNeeded'
 import StatCard from '@/components/StatCard'
+import IndirDugmesi from '@/components/ui/IndirDugmesi'
 import { getSessionProfile, isStaffRole } from '@/lib/auth'
 import { eur, monthOf, todayISO, trMonth } from '@/lib/format'
 import { kategoriEtiketi } from '@/lib/kategoriMeta'
@@ -80,14 +81,23 @@ export default async function TakvimSayfasi({ taraf, yol, baslik, aciklama, aram
           <p className="mt-1 text-sm text-slate-500">{aciklama}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {staff && (
-            <a
-              href="/api/export/borclar"
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 print:hidden"
-              title="Konsinye ve Peşin takvimleri, borç listeleri ve bakiyeler — Excel düzeninde"
+          {taraf === 'VADELI' && (
+            <IndirDugmesi
+              url="/api/export/vadeli-bakiyeler"
+              yedekAd={`vadeli_bakiyeler_${bugun}.xlsx`}
+              title="Vadeli Bakiyeler tablosu — bütün aylar; renkli, formüllü Excel dosyası"
             >
-              Excel İndir
-            </a>
+              Vadeli Bakiyeler
+            </IndirDugmesi>
+          )}
+          {staff && (
+            <IndirDugmesi
+              url="/api/export/borclar"
+              yedekAd={`borclar_${bugun}.xlsx`}
+              title="Konsinye ve Peşin takvimleri, borç listeleri ve bakiyeler — düz Excel listeleri"
+            >
+              Borç Raporu
+            </IndirDugmesi>
           )}
           <AySecici yol={yol} ay={ay} buAy={buAy} aylar={veri.aylar} kategori={kategori} />
         </div>

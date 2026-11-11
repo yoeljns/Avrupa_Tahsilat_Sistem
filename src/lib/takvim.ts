@@ -180,7 +180,8 @@ export interface Suzgec {
 
 export const BOS_SUZGEC: Suzgec = { arama: '', sorumlu: '', yalnizGecikmis: false, bitenleriGizle: false }
 
-function sade(s: string): string {
+/** Arama anahtarı: Türkçe harf ve büyük/küçük duyarsız, boşluksuz ('Çağdaş Boya' → 'CAGDASBOYA') */
+export function sade(s: string): string {
   return normText(s).replace(/\s+/g, '')
 }
 

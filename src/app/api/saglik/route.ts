@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { supabaseAnonKey, supabaseUrl } from '@/lib/env'
+import { excelSinamasi } from '@/lib/export/belgeSinamasi'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -8,8 +9,13 @@ export const dynamic = 'force-dynamic'
 // SAĞLIK / HIZ KONTROLÜ (herkese açık, veri döndürmez): uygulamanın koştuğu
 // bölge ve veritabanına gidiş-dönüş süresi. Yavaşlık şikâyetinde ilk bakılacak
 // yer: aynı bölgedeyse HTTPS turu ~30-40 ms, okyanus aşırıysa ~100+ ms olur.
+//
+// ?belge=1 → belge kütüphanelerinin öz-sınaması: UYDURMA örnek veriden küçük bir
+// Excel dosyası üretilir, yalnız boyutu döner (gerçek veri yok). Yayından sonra
+// kütüphanelerin sunucuda yüklendiğini oturum açmadan doğrulamak içindir.
 
-export async function GET() {
+export async function GET(request: Request) {
+  const belgeIstendi = new URL(request.url).searchParams.get('belge') === '1'
   const bolge = process.env.VERCEL_REGION ?? 'yerel'
   let turlar: number[] = []
   let hata: string | null = null
@@ -28,9 +34,10 @@ export async function GET() {
     turlar = []
   }
   const enHizli = turlar.length > 0 ? Math.min(...turlar) : null
+  const belge = belgeIstendi ? { excel: await excelSinamasi() } : undefined
   return NextResponse.json(
     {
-      durum: hata ? 'hata' : 'ok',
+      durum: hata || (belge && !belge.excel.ok) ? 'hata' : 'ok',
       sunucu_bolgesi: bolge,
       veritabani_tur_ms: turlar,
       en_hizli_tur_ms: enHizli,
@@ -41,6 +48,7 @@ export async function GET() {
             ? 'Uygulama ve veritabanı aynı bölgede (normal).'
             : 'Uygulama veritabanından uzak: her sorgu ' + enHizli + ' ms yol alıyor.',
       hata,
+      ...(belge ? { belge } : {}),
     },
     { headers: { 'Cache-Control': 'no-store' } },
   )

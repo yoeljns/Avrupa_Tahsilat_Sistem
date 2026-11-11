@@ -18,4 +18,21 @@
   body {
     background: #fff;
   }
+
+  /* Bakiye tablosu (Konsinye → Bakiye tablosu): yazdırırken yapışkan hücreler
+     sayfanın ortasına takılmasın; toplam satırı her sayfada yinelenmesin;
+     ay başına yalnız KALAN sütunu basılsın (tam tablo Excel'den yazdırılır). */
+  .bakiye-tablosu th,
+  .bakiye-tablosu td {
+    position: static !important;
+  }
+  .bakiye-tablosu tfoot {
+    display: table-row-group;
+  }
+  .bakiye-tablosu .yalniz-ekran {
+    display: none !important;
+  }
+  .bakiye-tablosu tr {
+    break-inside: avoid;
+  }
 }

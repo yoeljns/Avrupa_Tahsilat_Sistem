@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { todayISO } from '@/lib/format'
 import type { Kural } from '@/lib/engine/kurallar'
+import type { BakiyeDokumSatiri, BakiyeFirma, BakiyeHucreSatiri } from '@/lib/bakiye/model'
 import type { KategoriMeta, Taraf } from '@/lib/kategoriMeta'
 import { ayAraligi as ayAraligiHesapla, type TakvimFirmaSatiri } from '@/lib/takvim'
 
@@ -393,4 +394,49 @@ export interface KategoriYonetimi {
 
 export function kategoriYonetimi(supabase: SupabaseClient): Promise<KategoriYonetimi> {
   return rpc<KategoriYonetimi>(supabase, 'rpc_kategori_yonetimi')
+}
+
+// ---------------------------------------------------------------------------
+// Bakiye tablosu, veri tazeliği, sorumlu atama (0009)
+// ---------------------------------------------------------------------------
+/** Yalnız tarihler — her role açık (0009: veri_tazeligi) */
+export interface VeriTazeligi {
+  son_irsaliye_yukleme: string | null
+  son_odeme_yukleme: string | null
+  /** 31/12 kayıtları hariç en son irsaliye tarihi (ISO gün) */
+  son_irsaliye_tarihi: string | null
+  /** En son ödeme tarihi (Türkiye günü, ISO) */
+  son_odeme_tarihi: string | null
+  son_hesap: string | null
+}
+
+export function veriTazeligi(supabase: SupabaseClient): Promise<VeriTazeligi> {
+  return rpc<VeriTazeligi>(supabase, 'veri_tazeligi')
+}
+
+export interface BakiyeVerisi {
+  run_id: string | null
+  tazelik: VeriTazeligi | null
+  firmalar: BakiyeFirma[]
+  hucreler: BakiyeHucreSatiri[]
+  /** yalnız p_dokum = true iken dolu */
+  dokum: BakiyeDokumSatiri[] | null
+  alacaklar: Array<{ firm_id: string; kod: string; ad: string; sorumlu: string | null; alacak: number }>
+  kategoriler: KategoriMeta[]
+}
+
+/** Bakiye tablosu verisi — tek tur; RLS: pazarlamacı yalnız kendi firmaları. taraf = null → iki taraf. */
+export function bakiyeVerisi(supabase: SupabaseClient, taraf: 'PESIN' | 'VADELI' | null, dokum = false): Promise<BakiyeVerisi> {
+  return rpc<BakiyeVerisi>(supabase, 'rpc_bakiye_verisi', { p_side: taraf, p_dokum: dokum })
+}
+
+export interface SorumluSecenekleri {
+  kullanicilar: Array<{ email: string; ad: string | null; rol: string; aktif: boolean }>
+  /** Firmalarda yazılı sorumlu e-postaları ve firma sayıları */
+  kullanilan: Array<{ email: string; firma: number }>
+}
+
+/** Staff değilse null (fonksiyon içeride denetler). */
+export function sorumluSecenekleri(supabase: SupabaseClient): Promise<SorumluSecenekleri | null> {
+  return rpc<SorumluSecenekleri | null>(supabase, 'rpc_sorumlu_secenekleri')
 }

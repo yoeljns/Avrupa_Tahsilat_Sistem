@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { Building2, TriangleAlert } from 'lucide-react'
 import ImportPanel from '@/components/ImportPanel'
+import SorumluAtama, { type SorumluFirma, type SorumluSecenek } from '@/components/yonetim/SorumluAtama'
 import Badge from '@/components/ui/Badge'
 import Card, { CardTitle } from '@/components/ui/Card'
 import PageHeader from '@/components/ui/PageHeader'
 import { isAdminRole, requireRole } from '@/lib/auth'
 import { fetchAll } from '@/lib/db'
-import { yonetimOzeti } from '@/lib/queries'
+import { sorumluSecenekleri, yonetimOzeti } from '@/lib/queries'
 import { createServerSupabase } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
@@ -15,10 +16,14 @@ export default async function BayilerPage() {
   const session = await requireRole(['yonetici', 'tahsilat_yoneticisi'])
   const supabase = await createServerSupabase()
 
-  const [firms, ozet] = await Promise.all([
-    fetchAll<{ pazarlamaci_email: string | null }>((from, to) => supabase.from('firms').select('pazarlamaci_email').order('id').range(from, to)),
+  const [firms, ozet, secenekVerisi] = await Promise.all([
+    fetchAll<{ id: string; code_norm: string; name: string; city: string | null; pazarlamaci_email: string | null }>((from, to) =>
+      supabase.from('firms').select('id, code_norm, name, city, pazarlamaci_email').order('code_norm').range(from, to),
+    ),
     // Aktif kullanıcıyla eşleşmeyen sorumlu e-postaları (0007 yoksa bu kontrol atlanır)
     yonetimOzeti(supabase).catch(() => null),
+    // Atama seçenekleri: kullanıcılar + kullanımdaki e-postalar (0009 yoksa atama tablosu gösterilmez)
+    sorumluSecenekleri(supabase).catch(() => null),
   ])
   const eslesmeyen = ozet ? new Set(ozet.eslesmeyen_sorumlular) : null
 
@@ -32,6 +37,30 @@ export default async function BayilerPage() {
   const satirlar = Array.from(byEmail.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
   const sorunlu = eslesmeyen ? satirlar.filter(([e]) => eslesmeyen.has(e)) : []
 
+  // Atama tablosu verisi
+  const atamaFirmalari: SorumluFirma[] = firms.map((f) => ({
+    id: f.id,
+    kod: f.code_norm,
+    ad: f.name,
+    sehir: f.city,
+    sorumlu: f.pazarlamaci_email?.trim().toLowerCase() || null,
+  }))
+  const secenekler: SorumluSecenek[] = []
+  if (secenekVerisi) {
+    const gorulen = new Set<string>()
+    const roller = ['pazarlamaci', 'tahsilat_yoneticisi', 'yonetici']
+    const aktifler = secenekVerisi.kullanicilar
+      .filter((k) => k.aktif)
+      .sort((a, b) => roller.indexOf(a.rol) - roller.indexOf(b.rol) || a.email.localeCompare(b.email))
+    for (const k of aktifler) {
+      gorulen.add(k.email)
+      secenekler.push({ email: k.email, ad: k.ad, aktifKullanici: true, rol: k.rol, firma: byEmail.get(k.email) ?? 0 })
+    }
+    for (const k of secenekVerisi.kullanilan) {
+      if (!gorulen.has(k.email)) secenekler.push({ email: k.email, ad: null, aktifKullanici: false, rol: null, firma: k.firma })
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -39,8 +68,8 @@ export default async function BayilerPage() {
         title="Bayiler ve Sorumlular"
         description={
           <>
-            Firma adları, şehirler ve <strong>pazarlamacı atamaları</strong> bu dosyadan gelir. Pazarlamacılar panelde yalnız kendilerine atanmış
-            firmaları görür.
+            Firma adları ve şehirler bayi listesi dosyasından gelir. <strong>Sorumlu (pazarlamacı) atamaları</strong> dosyadan ya da aşağıdaki
+            tablodan yapılır. Pazarlamacılar panelde yalnız kendilerine atanmış firmaları görür.
           </>
         }
       />
@@ -49,7 +78,7 @@ export default async function BayilerPage() {
         <ImportPanel
           kind="bayiler"
           title="Bayi Listesi (.xlsx)"
-          description="Sütunlar: logo_kodu, bayi_adi, segment, sehir, telefon, pazarlamaci_email. Kod eşleşen firmalar güncellenir, yeniler eklenir; hiçbir firma silinmez."
+          description="Sütunlar: logo_kodu, bayi_adi, segment, sehir, telefon, pazarlamaci_email. Kod eşleşen firmalar güncellenir, yeniler eklenir; hiçbir firma silinmez. Dosyada sorumlusu boş olan firmanın mevcut sorumlusu korunur."
           accept=".xlsx,.xls"
         />
       </div>
@@ -73,6 +102,8 @@ export default async function BayilerPage() {
           </p>
         </div>
       )}
+
+      {secenekVerisi && <SorumluAtama firmalar={atamaFirmalari} secenekler={secenekler} />}
 
       <Card padded={false} className="max-w-3xl">
         <div className="border-b border-slate-100 px-5 py-4">

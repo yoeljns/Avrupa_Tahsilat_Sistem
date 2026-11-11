@@ -8,6 +8,7 @@ export const KAYIT_TURU_ETIKETLERI: Record<string, string> = {
   irsaliye: 'İrsaliye',
   odeme: 'Ödeme',
   kullanici: 'Kullanıcı',
+  firma: 'Firma',
   haric_firma: 'Takip Dışı Firma',
   ice_aktarim: 'İçe Aktarım',
   kategori: 'Satış Kategorisi',
@@ -31,6 +32,7 @@ export const ISLEM_ETIKETLERI: Record<string, { ad: string; ton: BadgeTone }> = 
   IRSALIYE_AKTARIMI: { ad: 'İrsaliye aktarımı', ton: 'violet' },
   ODEME_AKTARIMI: { ad: 'Ödeme aktarımı', ton: 'violet' },
   BAYI_AKTARIMI: { ad: 'Bayi listesi aktarımı', ton: 'violet' },
+  SORUMLU_ATAMA: { ad: 'Sorumlu değişti', ton: 'blue' },
   HARIC_EKLEME: { ad: 'Takip dışına alındı', ton: 'gray' },
   HARIC_CIKARMA: { ad: 'Takibe geri alındı', ton: 'green' },
   KULLANICI_OLUSTURMA: { ad: 'Kullanıcı oluşturuldu', ton: 'green' },
@@ -61,6 +63,7 @@ export const ALAN_ETIKETLERI: Record<string, string> = {
   rol: 'rol',
   aktif: 'durum',
   taraf: 'davranış',
+  sorumlu: 'sorumlu',
 }
 
 const ROL_ETIKETLERI: Record<string, string> = {

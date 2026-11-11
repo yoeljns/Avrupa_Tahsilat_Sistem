@@ -51,6 +51,8 @@ export async function POST(request: Request) {
 
   const counts: Record<string, number> = {}
   const stagedRows: Record<string, unknown>[] = []
+  // dosyada sorumlusu boş olup sistemde sorumlusu bulunan firmalar (atama korunur)
+  let korunanSorumlu = 0
   for (const rec of parsed.records) {
     const ex = existing.get(rec.codeNorm)
     const changed: string[] = []
@@ -61,7 +63,9 @@ export async function POST(request: Request) {
       if (k.segment && (ex.segment ?? '') !== rec.segment) changed.push('segment')
       if (k.city && (ex.city ?? '') !== rec.city) changed.push('sehir')
       if (k.phone && (ex.phone ?? '') !== rec.phone) changed.push('telefon')
-      if (k.pazarlamaciEmail && (ex.pazarlamaci_email ?? '').toLowerCase() !== rec.pazarlamaciEmail) changed.push('pazarlamaci')
+      // Boş sorumlu hücresi mevcut atamayı silmez → değişiklik sayılmaz (commit de yazmaz)
+      if (k.pazarlamaciEmail && rec.pazarlamaciEmail && (ex.pazarlamaci_email ?? '').toLowerCase() !== rec.pazarlamaciEmail) changed.push('pazarlamaci')
+      if (k.pazarlamaciEmail && !rec.pazarlamaciEmail && (ex.pazarlamaci_email ?? '').trim() !== '') korunanSorumlu++
       if (k.borcDurumu && (ex.borc_durumu ?? '') !== rec.borcDurumu) changed.push('borc_durumu')
     }
     const status = !ex ? 'new' : changed.length > 0 ? 'updated' : 'unchanged'
@@ -88,6 +92,13 @@ export async function POST(request: Request) {
     })
   }
 
+  const warnings = [...parsed.warnings]
+  if (korunanSorumlu > 0) {
+    warnings.push(
+      `${korunanSorumlu} firmada dosyadaki sorumlu (pazarlamaci_email) hücresi boş; sistemdeki mevcut atama korunur. Sorumluyu kaldırmak için aşağıdaki tabloyu kullanın.`,
+    )
+  }
+
   await chunkedWrite(stagedRows, (chunk) => admin.from('import_rows').insert(chunk))
   await admin.from('import_batches').update({ stats: counts }).eq('id', batch.id)
 
@@ -95,7 +106,7 @@ export async function POST(request: Request) {
     batchId: batch.id,
     counts,
     total: parsed.records.length + parsed.invalids.length,
-    warnings: parsed.warnings,
+    warnings,
     samples: {
       invalid: parsed.invalids.slice(0, 20),
       updated: stagedRows
